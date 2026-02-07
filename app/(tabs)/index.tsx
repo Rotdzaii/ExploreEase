@@ -1,98 +1,126 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect, useState } from 'react';
+import {
+  Animated,
+  type ColorValue,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  View
+} from 'react-native';
+import { CategoriesCarousel } from '../../components/home/CategoriesCarousel';
+import { FeaturedDestination } from '../../components/home/FeaturedDestination';
+import { Header } from '../../components/home/Header';
+import { PopularDestinations } from '../../components/home/PopularDestinations';
+import { SearchBar } from '../../components/home/SearchBar';
+import { supabase } from '../../src/services/supabase';
+import { getStyles } from './styles'; // Import hàm getStyles mới
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const [profile, setProfile] = useState<{ full_name: string } | null>(null);
+  const [isDarkMode, setIsDarkMode] = useState(true); // Trạng thái Sáng/Tối
+  const [notifications] = useState<any[]>([]);
+  const [searchText, setSearchText] = useState('');
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const pulse = React.useRef(new Animated.Value(0)).current;
+
+  // Lấy styles dựa trên state hiện tại
+  const styles = getStyles(isDarkMode);
+
+  useEffect(() => {
+    fetchProfile();
+  }, []);
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1800, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 1800, useNativeDriver: true }),
+      ])
+    );
+
+    animation.start();
+    return () => animation.stop();
+  }, [pulse]);
+
+  const fetchProfile = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
+      setProfile(data);
+    }
+  };
+
+  const gradientColors: readonly [ColorValue, ColorValue, ColorValue] = isDarkMode
+    ? ['#0a1929', '#0a1929', 'rgba(10,25,41,0.95)']
+    : ['#f8fafc', '#f8fafc', 'rgba(248,250,252,0.95)'];
+
+  const blobAnimStyle1 = {
+    opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0.38] }),
+    transform: [
+      {
+        scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] }),
+      },
+    ],
+  };
+
+  const blobAnimStyle2 = {
+    opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.2, 0.32] }),
+    transform: [
+      {
+        scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1.02, 1.1] }),
+      },
+    ],
+  };
+
+  const displayName = profile?.full_name || 'Nguyên';
+  const avatarUrl = `https://api.dicebear.com/7.x/avataaars/jpg?seed=${encodeURIComponent(displayName)}`;
+
+  return (
+    <LinearGradient colors={gradientColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.mainContainer}>
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
+      {/* Animated background gradient elements */}
+      <View pointerEvents="none" style={styles.bgBlobContainer}>
+        <Animated.View style={[styles.bgCircle1, blobAnimStyle1]} />
+        <Animated.View style={[styles.bgCircle2, blobAnimStyle2]} />
+      </View>
+
+      <SafeAreaView style={{ flex: 1 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.pageContent}>
+            <Header
+              styles={styles}
+              name={displayName}
+              avatarUrl={avatarUrl}
+              isDarkMode={isDarkMode}
+              onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+              hasNotifications={notifications.length > 0}
+            />
+
+            <SearchBar
+              styles={styles}
+              isDarkMode={isDarkMode}
+              value={searchText}
+              onChangeText={setSearchText}
+              onPressFilters={() => {}}
+            />
+
+            <CategoriesCarousel styles={styles} isDarkMode={isDarkMode} initialActiveId="beaches" />
+
+            <FeaturedDestination
+              styles={styles}
+              title="Bali Temples & Rice"
+              location="Ubud, Indonesia"
+              imageUrl="https://images.unsplash.com/photo-1537996194471-e657df975ab4"
+              onPress={() => {}}
+            />
+
+            <PopularDestinations styles={styles} />
+
+            <View style={{ height: 48 }} />
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
-
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
-});
