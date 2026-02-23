@@ -1,23 +1,24 @@
+import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { router } from 'expo-router';
 import React, { useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  ImageBackground,
-  KeyboardAvoidingView,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View
+    ActivityIndicator,
+    Alert,
+    Animated,
+    ImageBackground,
+    KeyboardAvoidingView,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    useWindowDimensions,
+    View
 } from 'react-native';
 // Đảm bảo đường dẫn này đúng với file supabase.ts trong src của cậu
 import { supabase } from '../src/services/supabase';
@@ -85,7 +86,7 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
-      const { data, error } = isLogin 
+      const { error } = isLogin 
         ? await supabase.auth.signInWithPassword({ email, password })
         : await supabase.auth.signUp({ 
             email, 
@@ -104,7 +105,7 @@ export default function LoginScreen() {
           toggleAuthMode(true);
         }
       }
-    } catch (err) {
+    } catch {
       Alert.alert('Lỗi kết nối', 'Không thể kết nối tới Supabase.');
     } finally {
       setLoading(false);
@@ -132,7 +133,7 @@ export default function LoginScreen() {
         <SafeAreaView style={styles.headerContainer}>
           <View style={styles.headerContent}>
             <View style={styles.logoCapsule}>
-              <MaterialCommunityIcons name="earth" size={24} color="#22d3ee" />
+              <MaterialCommunityIcons name="earth" size={24} color={ExploreEaseColors.primary} />
               <Text style={styles.logoText}>EXPLOREEASE</Text>
             </View>
             <TouchableOpacity onPress={() => setIsDark(!isDark)}>
@@ -149,7 +150,10 @@ export default function LoginScreen() {
               
               {isLargeScreen && (
                 <BlurView intensity={20} tint="dark" style={styles.leftPanel}>
-                  <Text style={styles.mainHeading}>Explore the World with {'\n'}<Text style={{ color: '#22d3ee' }}>Ease</Text></Text>
+                  <Text style={styles.mainHeading}>
+                    Explore the World with {'\n'}
+                    <Text style={{ color: ExploreEaseColors.primary }}>Ease</Text>
+                  </Text>
                   <View style={styles.adSpace}>
                     <MaterialCommunityIcons name="image-filter-hdr" size={40} color="rgba(255,255,255,0.3)" />
                     <Text style={styles.adTitle}>SPONSORED DESTINATION</Text>
@@ -171,7 +175,7 @@ export default function LoginScreen() {
                       </TouchableOpacity>
                       <SocialLoginArea isDark={isDark} />
                       <TouchableOpacity onPress={() => toggleAuthMode(false)} style={styles.switchMode}>
-                        <Text style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Don't have an account? <Text style={styles.linkText}>Sign Up</Text></Text>
+                        <Text style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Don&apos;t have an account? <Text style={styles.linkText}>Sign Up</Text></Text>
                       </TouchableOpacity>
                     </View>
 

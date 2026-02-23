@@ -1,8 +1,9 @@
+import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
-import { Bell, Moon, Sun } from 'lucide-react-native';
 import React from 'react';
-import { Platform, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, Pressable, Text, View } from 'react-native';
 
 type HeaderProps = {
   styles: any;
@@ -11,6 +12,7 @@ type HeaderProps = {
   isDarkMode: boolean;
   onToggleTheme?: () => void;
   hasNotifications?: boolean;
+  onPressNotifications?: () => void;
 };
 
 export function Header({
@@ -20,6 +22,7 @@ export function Header({
   isDarkMode,
   onToggleTheme,
   hasNotifications,
+  onPressNotifications,
 }: HeaderProps) {
   return (
     <View style={styles.headerShell}>
@@ -47,19 +50,39 @@ export function Header({
 
         <View style={styles.headerActions}>
           {onToggleTheme && (
-            <TouchableOpacity style={styles.iconBtn} onPress={onToggleTheme} activeOpacity={0.85}>
-              {isDarkMode ? (
-                <Sun size={18} color={isDarkMode ? '#22d3ee' : '#0f172a'} />
-              ) : (
-                <Moon size={18} color={isDarkMode ? '#22d3ee' : '#0f172a'} />
-              )}
-            </TouchableOpacity>
+            <Pressable
+              style={({ pressed, hovered }) => [
+                styles.iconBtn,
+                (Platform.OS === 'web' && hovered) ? { transform: [{ scale: 1.03 }], opacity: 0.96 } : null,
+                pressed ? { opacity: 0.85, transform: [{ scale: 0.98 }] } : null,
+              ]}
+              onPress={onToggleTheme}
+              accessibilityRole="button"
+            >
+              <MaterialCommunityIcons
+                name={isDarkMode ? 'weather-sunny' : 'weather-night'}
+                size={18}
+                color={isDarkMode ? ExploreEaseColors.primary : ExploreEaseColors.background}
+              />
+            </Pressable>
           )}
 
-          <TouchableOpacity style={styles.notifBtn} activeOpacity={0.85}>
-            <Bell size={20} color={'#22d3ee'} />
+          <Pressable
+            style={({ pressed, hovered }) => [
+              styles.notifBtn,
+              (Platform.OS === 'web' && hovered) ? { transform: [{ scale: 1.03 }], opacity: 0.96 } : null,
+              pressed ? { opacity: 0.85, transform: [{ scale: 0.98 }] } : null,
+            ]}
+            onPress={onPressNotifications}
+            accessibilityRole="button"
+          >
+            <MaterialCommunityIcons
+              name="bell-outline"
+              size={20}
+              color={ExploreEaseColors.primary}
+            />
             {!!hasNotifications && <View style={styles.notifDot} />}
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
 

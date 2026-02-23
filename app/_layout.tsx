@@ -1,5 +1,10 @@
 import { Stack } from 'expo-router';
 
+if (process.env.EXPO_OS === 'web') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('../global.css');
+}
+
 export default function RootLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>

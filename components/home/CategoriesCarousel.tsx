@@ -1,12 +1,19 @@
-import { Building2, Mountain, Tent, Waves } from 'lucide-react-native';
+import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useMemo, useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 
-type CategoryId = 'mountains' | 'beaches' | 'cities' | 'camping';
+type CategoryId = string;
+
+type CategoryItem = {
+  id: string;
+  label: string;
+};
 
 type CategoriesCarouselProps = {
   styles: any;
   isDarkMode: boolean;
+  categories?: CategoryItem[];
   initialActiveId?: CategoryId;
   onChange?: (id: CategoryId) => void;
 };
@@ -14,18 +21,29 @@ type CategoriesCarouselProps = {
 export function CategoriesCarousel({
   styles,
   isDarkMode,
+  categories: categoriesProp,
   initialActiveId = 'beaches',
   onChange,
 }: CategoriesCarouselProps) {
-  const categories = useMemo(
-    () => [
-      { id: 'mountains' as const, label: 'Mountains', Icon: Mountain },
-      { id: 'beaches' as const, label: 'Beaches', Icon: Waves },
-      { id: 'cities' as const, label: 'Cities', Icon: Building2 },
-      { id: 'camping' as const, label: 'Camping', Icon: Tent },
-    ],
-    []
+  const categories = useMemo<CategoryItem[]>(
+    () =>
+      categoriesProp ?? [
+        { id: 'mountains', label: 'Mountains' },
+        { id: 'beaches', label: 'Beaches' },
+        { id: 'cities', label: 'Cities' },
+        { id: 'camping', label: 'Camping' },
+      ],
+    [categoriesProp]
   );
+
+  const iconForCategory = (label: string) => {
+    const key = label.toLowerCase();
+    if (key.includes('beach') || key.includes('biển')) return 'waves';
+    if (key.includes('mount') || key.includes('núi')) return 'image-filter-hdr';
+    if (key.includes('city') || key.includes('thành')) return 'city-variant-outline';
+    if (key.includes('camp') || key.includes('cắm')) return 'tent';
+    return 'shape-outline';
+  };
 
   const [active, setActive] = useState<CategoryId>(initialActiveId);
 
@@ -36,20 +54,29 @@ export function CategoriesCarousel({
 
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.catScroll}>
-      {categories.map(({ id, label, Icon }) => {
+      {categories.map(({ id, label }) => {
         const isActive = id === active;
         return (
-          <TouchableOpacity
+          <Pressable
             key={id}
-            style={[styles.catItem, isActive && styles.catItemActive]}
+            style={({ pressed, hovered }) => [
+              styles.catItem,
+              isActive && styles.catItemActive,
+              (Platform.OS === 'web' && hovered) ? { transform: [{ scale: 1.02 }], opacity: 0.97 } : null,
+              pressed ? { opacity: 0.9, transform: [{ scale: 0.99 }] } : null,
+            ]}
             onPress={() => setCategory(id)}
-            activeOpacity={0.85}
+            accessibilityRole="button"
           >
             <View style={[styles.catIconBox, isActive && styles.catIconActive]}>
-              <Icon size={20} color={isActive ? '#22d3ee' : isDarkMode ? '#94a3b8' : '#64748b'} />
+              <MaterialCommunityIcons
+                name={iconForCategory(label) as any}
+                size={20}
+                color={isActive ? ExploreEaseColors.primary : isDarkMode ? '#94a3b8' : '#64748b'}
+              />
             </View>
             <Text style={[styles.catText, isActive && styles.catTextActive]}>{label}</Text>
-          </TouchableOpacity>
+          </Pressable>
         );
       })}
     </ScrollView>

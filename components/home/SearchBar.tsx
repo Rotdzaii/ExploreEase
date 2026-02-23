@@ -1,7 +1,8 @@
+import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { Search, SlidersHorizontal } from 'lucide-react-native';
 import React, { useState } from 'react';
-import { TextInput, TouchableOpacity, View } from 'react-native';
+import { Platform, Pressable, TextInput, View } from 'react-native';
 
 type SearchBarProps = {
   styles: any;
@@ -30,7 +31,11 @@ export function SearchBar({
         style={[styles.searchBlur, focused && styles.searchBlurFocused]}
       >
         <View style={styles.searchInner}>
-          <Search size={20} color={isDarkMode ? '#94a3b8' : '#64748b'} />
+          <MaterialCommunityIcons
+            name="magnify"
+            size={20}
+            color={isDarkMode ? '#94a3b8' : '#64748b'}
+          />
           <TextInput
             value={value}
             onChangeText={onChangeText}
@@ -40,9 +45,21 @@ export function SearchBar({
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
           />
-          <TouchableOpacity style={styles.searchFilterBtn} onPress={onPressFilters} activeOpacity={0.85}>
-            <SlidersHorizontal size={18} color={'#22d3ee'} />
-          </TouchableOpacity>
+          <Pressable
+            style={({ pressed, hovered }) => [
+              styles.searchFilterBtn,
+              (Platform.OS === 'web' && hovered) ? { transform: [{ scale: 1.03 }], opacity: 0.95 } : null,
+              pressed ? { opacity: 0.85, transform: [{ scale: 0.98 }] } : null,
+            ]}
+            onPress={onPressFilters}
+            accessibilityRole="button"
+          >
+            <MaterialCommunityIcons
+              name="tune-variant"
+              size={18}
+              color={ExploreEaseColors.primary}
+            />
+          </Pressable>
         </View>
       </BlurView>
     </View>
