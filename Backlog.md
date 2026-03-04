@@ -1,83 +1,253 @@
-Phase 1: Core & Essential (Ưu tiên cao)
-Đây là các hạng mục bắt buộc để luồng chính của App vận hành.
+1. USER MANAGEMENT (5%)
+    1.1 Registration & Login
+        [x] Email/password sign-in (Supabase Auth)
 
-[x] B1.1: Destination Detail Page (Module 4.3)
-    -  [x] Tạo `app/destination/[id].tsx` với scaffold chuẩn.
-    -  [x] Tích hợp Header Image, Floating Card và Sticky Button.
+        [x] Support Google sign-in (Cần cấu hình Client ID trên Google Cloud Console)
 
-[x] B1.2: Rating & Review System (Module 7)
-    - [x] Backend: Tạo bảng `reviews` & RLS Policies.
-    - [x] Service: Thêm hàm `getReviews`, `submitReview`, và `calculateAverageRating`.
-    - [ ] UI: Hiển thị danh sách đánh giá tại trang chi tiết.
-    - [ ] Logic: Cho phép người dùng gửi đánh giá mới.
+        [ ] Email/OTP verification flow
 
-[x] B1.3: Backend Search Logic (Module 4.2)
-    - [x] Connectivity: Truyền Params từ Home sang Detail.
-    - [x] Logic: Viết hàm `searchDestinations` dùng `.ilike()`.
-    - [x] UI: Kết nối SearchBar với hàm handleSearch và xử lý Race Condition.
+        [x] Form validations (Regex email, strong password check: 8+ ký tự, 1 hoa, 1 số)
 
-[x] B1.4: Performance Optimization (Module 6)
-    Chuyển PopularDestinations từ .map() sang FlatList để tiết kiệm RAM.
+        [ ] Forgot password and recovery via email trigger
 
-Phase 2: Features & Experience (Nâng cao)
-Gia tăng giá trị và trải nghiệm cho người dùng.
+        [x] UI Logic: Login button disabled until fields are filled
 
-[ ] B2.1: Location-Based Discovery (Module 2)
-Tích hợp expo-location lấy tọa độ GPS thực tế.
+        [x] Logout implementation
 
-[ ] B2.2: Event Management (Module 5)
-Khám phá các sự kiện du lịch địa phương.
+        [ ] Session timeout handling (Config trong Supabase Provider)
+    1.2 Profile & Preferences
 
-[ ] B2.3: Offline Access (Module 9)
-Caching dữ liệu điểm đến vào bộ nhớ máy.
+        [x] Profile fields: Name, age, gender, travel style
 
-Phase 3: SAD Documentation & Final
-Hoàn thiện tài liệu theo quy chuẩn kiến trúc phần mềm.
+        [/] Select interests: Food, culture, shopping, nature, adventure (Đã có bảng, cần UI chọn)
 
-[ ] B3.1: UML Diagrams
-Vẽ Use Case cho luồng Discovery.
-Vẽ Sequence Diagram cho luồng gửi Review.
+        [x] Edit profile and preferences anytime logic
 
-[ ] B3.2: Architecture Views
-Mô tả Module View (Cấu trúc file) và C&C View (Kết nối Database).
+2. LOCATION-BASED DISCOVERY (5%)
+    2.1 GPS Integration
 
-[ ] B3.3: Advanced Feature Selection
-Chọn làm Voice Search hoặc Itinerary Builder (Lên lộ trình).
+        [x] Real-time location tracking: Đã tích hợp expo-location để lấy tọa độ hiện tại của thiết bị.
 
-- [ ] **B4.1: Social Circle (Module 14)**
-    - Follow/Unfollow người dùng khác.
-    - Activity Stream: "User A vừa đánh giá 5 sao cho địa điểm B".
-    - Chia sẻ địa điểm qua QR Code.
-- [ ] **B4.2: In-App Messaging (Module 15)**
-    - Chat 1-1 giữa người dùng và chủ sự kiện (End-to-end encryption).
-    - Group Chat cho từng sự kiện cụ thể.
-- [ ] **B4.3: AI & Voice Search (Module 13)**
-    - Tích hợp Google Speech API cho Voice Search.
-    - Logic "Tìm địa điểm tương tự" dùng Vector Similarity (AI-Based).
+        [x] Handle location permissions properly (Android 12+): Đã xử lý yêu cầu quyền ACCESS_FINE_LOCATION và ACCESS_COARSE_LOCATION.
 
-## 📊 Phase 5: Administration & Planning (Module 11, 12)
-*Hoàn thiện hệ thống quản lý và lập kế hoạch chuyên sâu.*
+        [ ] Manual location override for future planning: Cần thêm tính năng cho phép User chọn một vị trí khác trên bản đồ để xem các gợi ý tại đó thay vì vị trí thực tế hiện tại.
 
-- [ ] **B5.1: Travel Planner (Module 12)**
-    - Itinerary builder: Lập kế hoạch du lịch theo từng ngày.
-    - Tối ưu hóa lộ trình di chuyển (Route optimization).
-- [ ] **B5.2: Admin Dashboard (Module 11)**
-    - Duyệt/Từ chối các sự kiện do người dùng tạo.
-    - Thống kê (Analytics): Top địa điểm, lượng người dùng active trên máy Acer Aspire 7.
+    2.2 Map View
 
-## 📝 Phase 6: SAD Documentation (Final Polish)
-*Hoàn thiện hồ sơ kiến trúc để bảo vệ đồ án.*
+        [x] Google Maps or Mapbox integration: Đã tích hợp Google Maps (thông qua Static Maps và Linking).
 
-- [ ] Tài liệu hóa **Arch Structure Perspectives**: Static, Dynamic, Physical.
-- [ ] Giải trình **Quality Tactics** cho Performance (FlatList) và Security (RLS).
+        [/] Display: Points of interest, events, recommended places nearby: Đã hiển thị danh sách, nhưng cần logic lọc "Nearby" (bán kính < 5km) để khớp với yêu cầu "Display".
 
-✅ Done
-[x] Setup Project: Expo + Supabase Auth.
+        [/] Distance calculation and route navigation: * Distance: Cần cài đặt hàm tính khoảng cách giữa User và địa danh.
 
-[x] Home UI: Header, SearchBar, Categories, Featured Card.
+        Navigation: Đã có logic mở Google Maps ngoại vi (Module 4.3).
 
-[x] Database Schema: profiles, notifications, categories, destinations.
+3. INTEREST MAPPING & PERSONALIZATION (10%)
 
-[x] Responsive Layout: useWindowDimensions + clamp logic.
+    3.1 Smart Matching
+        [ / ] Match recommendations with user preferences & activity history:
 
-[x] Real-time Notifications: Subscribe INSERT logic & Bell red-dot.
+Status: Đã có bảng profiles.interests. Cần viết hàm getRecommendedDestinations để thực hiện phép JOIN giữa sở thích người dùng và thể loại của địa danh.
+
+        [ ] Context filters: time of day, weather, seasonal trends:
+
+Status: Cần tích hợp OpenWeather API để gợi ý địa điểm trong nhà khi trời mưa, hoặc gợi ý quán cafe/bar theo khung giờ (Time of day).
+
+        [ ] Use ML to learn user behavior over time for better suggestions:
+
+Status: Ở mức đồ án, có thể dùng thuật toán Content-based Filtering đơn giản hoặc tích hợp OpenAI Embedding (nếu làm phần Module 13).
+
+        3.2 Experience-Aware Suggestions
+            [ / ] Solo vs family suggestions:
+
+Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suitability vào bảng destinations để lọc nội dung khớp với phong cách đi một mình hay đi cùng gia đình.
+
+            [ ] Show similar attractions (“You might also like”):
+
+            Status: Cần triển khai Component ở cuối trang Chi tiết, truy vấn các địa danh có cùng category_id.
+
+            [ / ] Prioritized results based on reviews and proximity:
+
+            Status: Đã có bảng reviews và tọa độ GPS. Cần thực hiện logic sắp xếp kết hợp: ORDER BY rating DESC, distance ASC.
+
+4. DISCOVERY MODULE
+
+    4.1 Content Browsing (Giao diện Home/Explore đã có)
+        [x] Explore: Attractions, cuisines, activities: Đã có giao diện phân loại trên Home.
+
+        [x] Auto-categorized content: Đã map dữ liệu từ Supabase theo category_id.
+
+    4.2 Search & Filter (Đã có UI, cần hoàn thiện logic filter giá/rating)
+        [/] Filters: category, rating, price, popularity, distance:
+
+            Price/Rating: Đã có.
+
+            Distance: Đã có tọa độ, cần hàm lọc theo bán kính.
+
+        [/] Sorting: relevance, top-rated, A-Z: Đã có logic order trong Supabase, cần gắn vào UI.
+
+        [ ] Search suggestions with autocomplete: Cần tích hợp Debounce search để gợi ý khi user gõ.
+
+    4.3 Detail Page
+        [x] Images, map, ratings, description, pricing: (Đã xong, bao gồm cả FX quy đổi tiền tệ).
+
+        [/] Bookmarking/favorites: Đã có bảng bookmarks trong SQL, cần gắn icon Trái tim để toggle trạng thái.
+
+        [x] “Get directions” integration with Google Maps: Đã dùng Linking để mở tọa độ trên Google Maps.
+
+        [ ] Display operational hours and real-time availability (optional): Cần thêm cột opening_hours vào DB nếu muốn làm.
+
+5. EVENT MANAGEMENT
+
+    5.1 Discovery
+        [/] Filter by: date, type, free/paid, distance: Cần hoàn thiện UI Filter chuyên dụng cho Sự kiện.
+
+        [/] Event lifecycle management:
+
+        [x] incoming, ongoing, completed status (Đã có logic trong SQL).
+
+        [ ] Countdown timers for upcoming events: Cần dùng setInterval hoặc thư viện countdown ở UI.
+
+        [/] Share button & bookmarking: Nút Share dùng Share API của React Native.
+
+        [/] Search by name and filter by status: Đã có câu lệnh ILIKE trong Supabase.
+    5.2 Creation
+        [/] Event form: title, category, location, time, price, image: Đã có Schema SQL, cần làm UI Form.
+
+        [x] Date logic: end date > start date: Cần thêm Validation ở Frontend trước khi gửi lên.
+
+        [ ] Admin approval before listing: Cần cột is_approved (boolean) trong bảng events.
+
+        [/] Edit/delete own event: Đã có chính sách RLS owner-only, cần thêm UI nút Sửa/Xóa.
+
+6. PAGINATION (5%)
+
+        [/] Infinite scroll for long lists: Hiện tại đang dùng FlatList, cần thêm hàm onEndReached để fetch thêm data từ Supabase khi kéo xuống cuối.
+
+        [ ] Optimize: attractions, events, reviews: Sử dụng limit và offset trong câu lệnh SQL để không tải toàn bộ database một lúc.
+
+        [ ] Preload next page on scroll detection: Thiết lập onEndReachedThreshold (ví dụ: 0.5) để app tự tải trang tiếp theo trước khi người dùng kéo tới đáy.
+
+7. RATING & REVIEW SYSTEM (10%)
+
+    7.1 Ratings 
+        [x] 1–5 star system: Đã có trong bảng reviews.
+
+        [ ] Visual rating bars: Cần làm UI hiển thị biểu đồ cột (5 sao chiếm bao nhiêu %, 4 sao bao nhiêu %...).
+    7.2 Reviews (Đã có SQL Seeding dữ liệu mẫu và sửa lỗi fetch 400)
+        [/] Text + optional photo: Phần Text đã xong, phần Photo cần tích hợp Supabase Storage để upload ảnh.
+
+        [/] Sort: newest, top-rated, most helpful: Đã xong logic newest, cần thêm cột helpful_count trong DB để làm most helpful.
+
+        [ ] Reply to reviews: Cần thêm cột parent_id hoặc reply_to trong bảng reviews để người tổ chức phản hồi.
+            Reply" thường dành cho chủ địa điểm hoặc Admin. Kiểm tra xem trong bảng profiles có phân quyền (role) chưa để hiện nút Trả lời cho đúng đối tượng.
+    7.3 Moderation
+        [ ] Flag/report reviews
+        [ ] Admin panel to review, delete, or approve flagged content
+
+8. NOTIFICATIONS (5%)
+
+    8.1 Push Notifications (Đã có bảng reminders, cần kết nối Expo Notifications)
+        [/] Push Notifications: Đã có bảng reminders, cần tích hợp expo-notifications để đẩy tin nhắn thật lên điện thoại.
+    8.2 In-App Center
+        [ ] In-App Center: Cần một màn hình "Thông báo" gom nhóm theo loại: Ưu đãi, Cảnh báo, Tin nhắn.
+
+9. DATA SYNCHRONIZATION & OFFLINE ACCESS (5%)
+
+        [x] Offline caching for saved items, profile: làm với FX Service qua AsyncStorage. Cần áp dụng tương tự cho danh sách Bookmarked.
+
+        [/] Auto-sync changes when back online: Cần sử dụng thư viện NetInfo để detect mạng và tự động đẩy các thay đổi (ví dụ: đánh dấu yêu thích khi offline) lên Supabase khi có mạng lại.
+
+        [ ] Limited offline access: Cho phép xem lại thông tin chi tiết các địa danh đã từng "đi qua" (cached) va event mà không cần mạng.
+
+10.  SECURITY & PRIVACY (5%)
+
+        [x] Secure actions require auth: Đã triển khai RLS (Row Level Security). User không thể tạo Event nếu chưa Login.
+
+        [x] Secure API communication with HTTPS: Mặc định của Supabase Cloud.
+
+        [ ] App-level encryption for cached data: Cần sử dụng expo-secure-store thay cho AsyncStorage đối với các thông tin nhạy cảm.
+
+        [ ] Two-factor auth (Optional): Có thể kích hoạt qua Supabase Auth Dashboard.
+
+11.  ADMIN DASHBOARD (New - 5%)
+
+        [/] View: user profiles, events, reviews:
+
+        Status: Xem trực tiếp qua Supabase Dashboard (Backend). Cần làm một màn hình UI dành riêng cho tài khoản có role: 'admin' để xem danh sách này trên app hoặc web.
+
+        [ ] Approve or reject events:
+
+        Status: Cần thêm cột status (enum: pending, approved, rejected) vào bảng events. Admin sẽ thực hiện UPDATE trạng thái này.
+
+        [ ] Moderate flagged content:
+
+        Status: Kết hợp với Module 7.3. Khi có bản ghi trong bảng reports, Admin sẽ có quyền xóa Review hoặc ẩn địa điểm.
+
+        [ ] View analytics (user activity, top places, traffic stats):
+
+        Status: Cần viết các hàm rpc (Stored Procedures) trong Supabase để đếm số lượt bookmark, số user mới, và địa danh được yêu thích nhất.
+
+12.  TRAVEL PLANNING (New - 5%)
+
+        [/] Itinerary builder: Add events and places to a day-wise plan:
+
+    Status: Trọng tâm. Đã có SQL itinerary_items. Đang triển khai BottomSheet để chọn ngày và thêm từ trang Chi tiết.
+
+        [ ] Share travel plans:
+
+    Status: Cần tạo mã QR (thư viện react-native-qrcode-svg) chứa Deep Link dẫn đến chuyến đi, hoặc xuất file PDF lịch trình.
+
+        [ x ] Add travel notes or reminders:
+
+    Status: Đã có cột notes trong Database. Logic nhắc nhở đã có bảng reminders.
+
+        [ ] Suggested route optimization:
+
+    Status: Thách thức kỹ thuật. Cần thuật toán sắp xếp các itinerary_items theo khoảng cách địa lý (từ tọa độ đã nạp) để gợi ý thứ tự đi 1 -> 2 -> 3 sao cho quãng đường ngắn nhất.
+
+13. ADVANCED SEARCH & SMART DISCOVERY (5%)
+
+    13.1 Voice Search
+        [/] Tìm kiếm bằng giọng nói (Google Speech API): * Status: Cậu có thể tận dụng WhisperX từ dự án Thesis trước đó hoặc dùng Google Speech-to-Text.
+
+        [ ] Gợi ý kết quả theo thời gian thực: Cần logic stream kết quả tìm kiếm ngay khi tiếng nói được chuyển thành văn bản.
+
+    13.2 AI-Based Similarity Search
+        [ ] Tìm địa điểm “giống với chỗ bạn đã thích”: Cần tính toán độ tương đồng giữa các địa danh.
+
+        [ ] Sử dụng embedding (BERT/Word2Vec hoặc vector similarity): Cậu nên dùng pgvector của Supabase để lưu trữ embedding và thực hiện tìm kiếm vector similarity. Đây là "điểm cộng" cực lớn cho SAD.
+
+    13.3 Multi-Factor Search
+        [/] Tìm theo: ngân sách, mood, thời gian rảnh, khoảng cách: * Status: Phần ngân sách đã có FX Service hỗ trợ. Cần thêm cột mood (chill, adventure, etc.) vào bảng destinations.
+
+        [ ] Hỗ trợ tìm lộ trình 1 ngày: “Gợi ý lịch trình 4 giờ buổi tối”.
+
+14. SOCIAL FEATURES (5%)
+
+    14.1 Follow/Unfollow
+        [ ] Theo dõi người dùng khác, travel blogger hoặc bạn bè: Cần tạo bảng follows (follower_id, following_id) với chính sách RLS phù hợp.
+
+    14.2 Feed & Activity Stream
+        [ ] Hiển thị hành động của bạn bè: * Ví dụ: “Anna vừa đánh giá Chợ Bến Thành 5★”.
+
+Status: Cần một bảng activities ghi lại các trigger từ Reviews và Bookmarks.
+
+    14.3 Shared Recommendations
+        [/] Share địa điểm qua QR: Đã có ý tưởng, cần cài react-native-qrcode-svg.
+
+        [ ] Gửi gợi ý trực tiếp qua in-app chat: Kết nối trực tiếp với Module 15.
+15. IN-APP MESSAGING (5%)
+
+    15.1 One-to-One Chat
+        [ ] Trao đổi giữa khách và người tổ chức sự kiện: Cần logic phân quyền giữa User và Organizer.
+
+        [ ] Chat end-to-end encryption (E2EE): * SAD Note: Cậu có thể dùng AES-256 hoặc thư viện Signal Protocol để mã hóa tin nhắn tại máy khách trước khi gửi lên Supabase.
+
+    15.2 Group Chat for Events
+        [ ] Tạo nhóm chat cho sự kiện để thảo luận: Tự động tạo nhóm dựa trên event_id.
+
+        [ ] Gửi ảnh, vị trí: Tích hợp Supabase Storage và GPS (Module 2).
+
+        [ ] Pin thông báo quan trọng: Logic gắn cờ cho tin nhắn trong bảng messages.
+--Chưa anti replay attack  

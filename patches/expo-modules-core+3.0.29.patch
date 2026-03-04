@@ -1,0 +1,14 @@
+diff --git a/node_modules/expo-modules-core/tsconfig.json b/node_modules/expo-modules-core/tsconfig.json
+index ae1ae0d..97cfca1 100644
+--- a/node_modules/expo-modules-core/tsconfig.json
++++ b/node_modules/expo-modules-core/tsconfig.json
+@@ -1,8 +1,7 @@
+ {
+-  "extends": "expo-module-scripts/tsconfig.base",
+   "compilerOptions": {
+     "outDir": "./build",
+-    "emitDeclarationOnly": true
++    "declaration": false
+   },
+   "include": ["./src"],
+   "exclude": ["**/__mocks__/*", "**/__tests__/*", "**/__rsc_tests__/*"]

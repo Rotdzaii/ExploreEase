@@ -3,5 +3,29 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true
+  },
+  "search.exclude": {
+    "**/node_modules/**": true
+  },
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false,
+  "javascript.tsserver.experimental.enableProjectDiagnostics": false,
+  "typescript.tsserver.watchOptions": {
+    "excludeDirectories": [
+      "**/node_modules/**"
+    ],
+    "excludeFiles": [
+      "**/node_modules/**/tsconfig.json"
+    ]
+  },
+  "javascript.tsserver.watchOptions": {
+    "excludeDirectories": [
+      "**/node_modules/**"
+    ],
+    "excludeFiles": [
+      "**/node_modules/**/tsconfig.json"
+    ]
   }
 }

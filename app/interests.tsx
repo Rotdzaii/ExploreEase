@@ -84,6 +84,6 @@ const styles = StyleSheet.create({
   activeChip: { backgroundColor: '#0d7ff2', borderColor: '#0d7ff2' },
   chipText: { fontWeight: '600', color: '#0d141c' },
   activeChipText: { color: '#fff' },
-  startBtn: { backgroundColor: '#0d7ff2', padding: 18, borderRadius: 15, alignItems: 'center', marginBottom: 20, shadowColor: '#0d7ff2', shadowOpacity: 0.3, shadowRadius: 10, elevation: 5 },
+  startBtn: { backgroundColor: '#0d7ff2', padding: 18, borderRadius: 15, alignItems: 'center', marginBottom: 20, boxShadow: '0px 8px 20px rgba(13, 127, 242, 0.30)' },
   startBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 18 }
 });

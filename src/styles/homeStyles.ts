@@ -1,6 +1,5 @@
+import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { Platform, StyleSheet } from 'react-native';
-
-import { ExploreEaseColors } from '../../constants/exploreEaseTheme';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -26,7 +25,7 @@ export const getStyles = ({ isDarkMode, screenWidth }: { isDarkMode: boolean; sc
       ...StyleSheet.absoluteFillObject,
       overflow: 'hidden',
     },
-    bgCircle1: { 
+    bgCircle1: {
       position: 'absolute',
       top: -s(160),
       right: -s(140),
@@ -95,16 +94,25 @@ export const getStyles = ({ isDarkMode, screenWidth }: { isDarkMode: boolean; sc
       borderColor: isDarkMode ? 'rgba(34,211,238,0.35)' : 'rgba(34,211,238,0.30)',
       backgroundColor: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
     },
-    avatarImg: { width: s(48), height: s(48), borderRadius: s(24), backgroundColor: isDarkMode ? '#1e293b' : '#e2e8f0' },
+    avatarImg: {
+      width: s(48),
+      height: s(48),
+      borderRadius: s(24),
+      backgroundColor: isDarkMode ? '#1e293b' : '#e2e8f0',
+    },
     welcomeSub: { color: colors.textSub, fontSize: s(12) },
     welcomeMain: { color: colors.textMain, fontSize: s(18), fontWeight: '800' },
-    
+
     headerActions: { flexDirection: 'row', gap: s(10) },
-    iconBtn: { 
-      width: s(40), height: s(40), borderRadius: s(20), 
-      backgroundColor: colors.cardBg, 
-      justifyContent: 'center', alignItems: 'center',
-      borderWidth: 1, borderColor: colors.border
+    iconBtn: {
+      width: s(40),
+      height: s(40),
+      borderRadius: s(20),
+      backgroundColor: colors.cardBg,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
     },
     notifBtn: {
       width: s(44),
@@ -116,22 +124,54 @@ export const getStyles = ({ isDarkMode, screenWidth }: { isDarkMode: boolean; sc
       borderWidth: 1,
       borderColor: isDarkMode ? 'rgba(34,211,238,0.20)' : 'rgba(34,211,238,0.22)',
     },
-    notifDot: { 
-      position: 'absolute', top: s(10), right: s(10), width: s(8), height: s(8), 
-      backgroundColor: '#ef4444', borderRadius: s(4), borderWidth: s(1.5), borderColor: colors.background 
+    notifDot: {
+      position: 'absolute',
+      top: s(10),
+      right: s(10),
+      width: s(8),
+      height: s(8),
+      backgroundColor: '#ef4444',
+      borderRadius: s(4),
+      borderWidth: s(1.5),
+      borderColor: colors.background,
+    },
+
+    notifBadge: {
+      position: 'absolute',
+      top: s(7),
+      right: s(7),
+      minWidth: s(18),
+      height: s(18),
+      paddingHorizontal: s(5),
+      borderRadius: 999,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: '#ef4444',
+      borderWidth: s(1.5),
+      borderColor: colors.background,
+    },
+    notifBadgeText: {
+      color: 'white',
+      fontSize: s(10),
+      fontWeight: '800',
+      lineHeight: s(12),
     },
 
     // --- SEARCH BAR (v0 Glass Style - Dynamic) ---
     searchContainer: {
       marginBottom: s(18),
-      ...Platform.select({ web: { boxShadow: isDarkMode ? '0 8px 32px 0 rgba(0,0,0,0.3)' : '0 8px 20px rgba(0,0,0,0.05)' } })
+      ...Platform.select({
+        web: {
+          boxShadow: isDarkMode ? '0 8px 32px 0 rgba(0,0,0,0.3)' : '0 8px 20px rgba(0,0,0,0.05)',
+        },
+      }),
     },
     searchBlur: {
       borderRadius: s(15),
       borderWidth: 1,
       borderColor: colors.border,
       borderBottomWidth: 1.5,
-      borderBottomColor: 'rgba(34, 211, 238, 0.4)', 
+      borderBottomColor: 'rgba(34, 211, 238, 0.4)',
       overflow: 'hidden',
       backgroundColor: colors.cardBg,
     },
@@ -141,18 +181,28 @@ export const getStyles = ({ isDarkMode, screenWidth }: { isDarkMode: boolean; sc
       ...Platform.select({ web: { boxShadow: '0 10px 30px rgba(34,211,238,0.15)' } as any }),
     },
     searchInner: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: s(15), height: s(55) },
-    searchInput: { flex: 1, color: colors.textMain, marginLeft: s(10), fontSize: s(15), ...Platform.select({ web: { outlineStyle: 'none' } as any }) },
+    searchInput: {
+      flex: 1,
+      color: colors.textMain,
+      marginLeft: s(10),
+      fontSize: s(15),
+      ...Platform.select({ web: { outlineStyle: 'none' } as any }),
+    },
     searchFilterBtn: { padding: s(8), borderRadius: s(10) },
 
     // --- CATEGORIES ---
     catScroll: { marginBottom: s(30) },
     catItem: { alignItems: 'center', gap: s(8), marginRight: s(25) },
     catItemActive: {},
-    catIconBox: { 
-      width: s(50), height: s(50), borderRadius: s(12), 
-      backgroundColor: colors.cardBg, 
-      justifyContent: 'center', alignItems: 'center',
-      borderWidth: 1, borderColor: colors.border
+    catIconBox: {
+      width: s(50),
+      height: s(50),
+      borderRadius: s(12),
+      backgroundColor: colors.cardBg,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
     },
     catIconActive: { backgroundColor: 'rgba(34, 211, 238, 0.15)', borderColor: ExploreEaseColors.primary },
     catText: { color: colors.textSub, fontSize: s(12), fontWeight: '500' },
@@ -162,7 +212,7 @@ export const getStyles = ({ isDarkMode, screenWidth }: { isDarkMode: boolean; sc
     sectionTitle: { color: colors.textMain, fontSize: s(20), fontWeight: '800', marginBottom: s(20) },
     featuredCard: { width: Math.round(screenWidth * 0.9), alignSelf: 'center', height: s(220), marginBottom: s(30) },
     featuredImage: { borderRadius: s(25) },
-    featuredGradient: { 
+    featuredGradient: {
       flex: 1,
       justifyContent: 'flex-end',
       padding: s(20),
@@ -189,10 +239,17 @@ export const getStyles = ({ isDarkMode, screenWidth }: { isDarkMode: boolean; sc
       borderColor: 'rgba(34, 211, 238, 0.28)',
     },
     featuredRatingText: { color: ExploreEaseColors.primary, fontSize: s(12), fontWeight: '700' },
-    viewDetailsBtn: { 
-      position: 'absolute', bottom: s(20), right: s(20),
-      flexDirection: 'row', alignItems: 'center', gap: s(6),
-      backgroundColor: ExploreEaseColors.primary, paddingHorizontal: s(16), paddingVertical: s(10), borderRadius: s(12)
+    viewDetailsBtn: {
+      position: 'absolute',
+      bottom: s(20),
+      right: s(20),
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s(6),
+      backgroundColor: ExploreEaseColors.primary,
+      paddingHorizontal: s(16),
+      paddingVertical: s(10),
+      borderRadius: s(12),
     },
     viewDetailsText: { color: ExploreEaseColors.background, fontWeight: 'bold', fontSize: s(14) },
 

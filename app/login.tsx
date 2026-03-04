@@ -1,8 +1,12 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
+import { useTheme } from '@/src/context/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as AuthSession from 'expo-auth-session';
+import * as Google from 'expo-auth-session/providers/google';
 import { BlurView } from 'expo-blur';
 import { router } from 'expo-router';
-import React, { useMemo, useRef, useState } from 'react';
+import * as WebBrowser from 'expo-web-browser';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -25,11 +29,18 @@ import { supabase } from '../src/services/supabase';
 
 const isWeb = Platform.OS === 'web';
 
+// Hoàn tất phiên xác thực trên trình duyệt (đặc biệt cần cho web)
+WebBrowser.maybeCompleteAuthSession();
+
 export default function LoginScreen() {
+  console.log('Client ID check:', process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
+
   const { width } = useWindowDimensions();
-  const [isDark, setIsDark] = useState(true);
+  const { isDark } = useTheme();
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
+
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   // States quản lý dữ liệu
   const [fullName, setFullName] = useState('');
@@ -42,6 +53,38 @@ export default function LoginScreen() {
   const slideAnim = useRef(new Animated.Value(0)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const authPanelWidth = isLargeScreen ? 1200 * 0.4 : width - 40;
+
+  const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '';
+  const googleAndroidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? '';
+  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '';
+
+  const redirectUri = useMemo(
+    () =>
+      AuthSession.makeRedirectUri({
+        native: 'exploreeaseexpo:/oauthredirect',
+      }),
+    []
+  );
+
+  const isGoogleConfiguredForPlatform =
+    (Platform.OS === 'web' && !!googleWebClientId) ||
+    (Platform.OS === 'android' && !!googleAndroidClientId) ||
+    (Platform.OS === 'ios' && !!googleIosClientId);
+
+  const [googleRequest, googleResponse, googlePromptAsync] = Google.useIdTokenAuthRequest(
+    {
+      webClientId: googleWebClientId || 'MISSING_WEB_CLIENT_ID',
+      androidClientId: googleAndroidClientId || undefined,
+      iosClientId: googleIosClientId || undefined,
+      // Fallback to prevent hook from throwing if platform-specific id is missing.
+      clientId: googleWebClientId || 'MISSING_CLIENT_ID',
+      redirectUri,
+    },
+    {
+      // Use the app scheme declared in app.json to keep redirect stable.
+      native: 'exploreeaseexpo:/oauthredirect',
+    }
+  );
 
   // --- CHECKLIST MẬT KHẨU REAL-TIME ---
   const passwordCriteria = useMemo(() => ({
@@ -60,6 +103,43 @@ export default function LoginScreen() {
       Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: !isWeb }),
     ]).start();
   };
+
+  useEffect(() => {
+    const finishGoogleLogin = async () => {
+      if (googleResponse?.type !== 'success') return;
+
+      const idToken =
+        (googleResponse as any)?.authentication?.idToken ??
+        (googleResponse as any)?.params?.id_token;
+
+      if (!idToken) {
+        Alert.alert('Đăng nhập thất bại', 'Không lấy được id_token từ Google.');
+        return;
+      }
+
+      setGoogleLoading(true);
+      try {
+        const { error } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: idToken,
+        });
+
+        if (error) {
+          console.log('Lỗi đăng nhập:', error.message);
+          Alert.alert('Lỗi đăng nhập', error.message);
+          return;
+        }
+
+        router.replace('/(tabs)');
+      } catch {
+        Alert.alert('Lỗi kết nối', 'Không thể đăng nhập bằng Google lúc này.');
+      } finally {
+        setGoogleLoading(false);
+      }
+    };
+
+    finishGoogleLogin();
+  }, [googleResponse]);
 
   const validate = () => {
     let newErrors: any = {};
@@ -122,12 +202,50 @@ export default function LoginScreen() {
     }).start();
   };
 
+  const handleGoogleLogin = async () => {
+    if (!isGoogleConfiguredForPlatform) {
+      const missingKey =
+        Platform.OS === 'web'
+          ? 'EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID'
+          : Platform.OS === 'android'
+            ? 'EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID'
+            : Platform.OS === 'ios'
+              ? 'EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID'
+              : 'EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID';
+
+      Alert.alert(
+        'Thiếu cấu hình Google',
+        `Cần đặt ${missingKey} trong .env (đúng loại OAuth Client ID theo platform) rồi restart Expo.`
+      );
+      return;
+    }
+
+    try {
+      if (__DEV__) {
+        console.log('[GoogleLogin] platform=', Platform.OS);
+        console.log('[GoogleLogin] redirectUri=', (googleRequest as any)?.redirectUri);
+      }
+
+      // Thêm dòng này vào hàm xử lý khi nhấn nút Login
+      const rUri = AuthSession.makeRedirectUri({
+        path: 'login', // Hoặc path cậu đang dùng
+        preferLink: true,
+      });
+      console.log('--- ĐỊA CHỈ REDIRECT ĐÂY NÈ ---');
+      console.log(rUri);
+
+      await googlePromptAsync();
+    } catch {
+      Alert.alert('Đăng nhập thất bại', 'Không thể mở Google đăng nhập.');
+    }
+  };
+
   return (
     <ImageBackground 
       source={{ uri: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e' }} 
       style={styles.backgroundImage}
     >
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       <View style={[styles.overlay, { backgroundColor: isDark ? 'rgba(10, 25, 41, 0.7)' : 'rgba(255, 255, 255, 0.1)' }]}>
         
         <SafeAreaView style={styles.headerContainer}>
@@ -136,11 +254,6 @@ export default function LoginScreen() {
               <MaterialCommunityIcons name="earth" size={24} color={ExploreEaseColors.primary} />
               <Text style={styles.logoText}>EXPLOREEASE</Text>
             </View>
-            <TouchableOpacity onPress={() => setIsDark(!isDark)}>
-              <BlurView intensity={30} tint="dark" style={styles.themeToggle}>
-                <MaterialCommunityIcons name={isDark ? "weather-sunny" : "weather-night"} size={22} color={isDark ? "#fde047" : "white"} />
-              </BlurView>
-            </TouchableOpacity>
           </View>
         </SafeAreaView>
 
@@ -173,7 +286,12 @@ export default function LoginScreen() {
                       <TouchableOpacity onPress={handleAuthAction} disabled={loading} style={styles.signInButton}>
                         {loading ? <ActivityIndicator color="white" /> : <Text style={styles.signInText}>Sign In</Text>}
                       </TouchableOpacity>
-                      <SocialLoginArea isDark={isDark} />
+                      <SocialLoginArea
+                        isDark={isDark}
+                        disabled={!googleRequest || googleLoading}
+                        loading={googleLoading}
+                        onGooglePress={handleGoogleLogin}
+                      />
                       <TouchableOpacity onPress={() => toggleAuthMode(false)} style={styles.switchMode}>
                         <Text style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Don&apos;t have an account? <Text style={styles.linkText}>Sign Up</Text></Text>
                       </TouchableOpacity>
@@ -242,7 +360,14 @@ function AuthInput({ label, icon, isDark, secure, placeholder, isPassword, onTog
   );
 }
 
-function SocialLoginArea({ isDark }: any) {
+type SocialLoginAreaProps = {
+  isDark: boolean;
+  disabled: boolean;
+  loading: boolean;
+  onGooglePress: () => void;
+};
+
+function SocialLoginArea({ isDark, disabled, loading, onGooglePress }: SocialLoginAreaProps) {
   return (
     <View style={{ marginTop: 20 }}>
       <View style={styles.dividerRow}>
@@ -250,13 +375,19 @@ function SocialLoginArea({ isDark }: any) {
         <Text style={styles.dividerText}>OR</Text>
         <View style={[styles.dividerLine, { backgroundColor: isDark ? '#334155' : '#e2e8f0' }]} />
       </View>
-      <View style={{ flexDirection: 'row', gap: 10 }}>
-        {['google', 'facebook', 'apple'].map(n => (
-          <TouchableOpacity key={n} style={[styles.socialBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0' }]}>
-            <MaterialCommunityIcons name={n as any} size={22} color={n === 'apple' ? (isDark ? 'white' : 'black') : (n === 'google' ? '#ef4444' : '#1877f2')} />
-          </TouchableOpacity>
-        ))}
-      </View>
+      <TouchableOpacity
+        disabled={disabled}
+        onPress={onGooglePress}
+        className={`flex-row items-center justify-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-95 ${
+          disabled ? 'opacity-50' : ''
+        }`}
+      >
+        {loading ? (
+          <ActivityIndicator color="#0f172a" />
+        ) : (
+          <Text className="font-bold text-slate-950">Tiếp tục với Google</Text>
+        )}
+      </TouchableOpacity>
     </View>
   );
 }

@@ -1,15 +1,21 @@
+import { useCurrency } from '@/src/context/currency';
+import { useTheme } from '@/src/context/theme';
+import { reminderService } from '@/src/services/reminderService';
+import { getStyles } from '@/src/styles/homeStyles';
+import { parseMoneyToNumber } from '@/utils/format';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Animated,
-  type ColorValue,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  useWindowDimensions,
-  View
+    Animated,
+    type ColorValue,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    useWindowDimensions,
+    View
 } from 'react-native';
 import { CategoriesCarousel } from '../../components/home/CategoriesCarousel';
 import { FeaturedDestination } from '../../components/home/FeaturedDestination';
@@ -18,8 +24,8 @@ import { PopularDestinations } from '../../components/home/PopularDestinations';
 import { SearchBar } from '../../components/home/SearchBar';
 import { ExploreEaseColors } from '../../constants/exploreEaseTheme';
 import { destinationService } from '../../src/services/destinationService';
+import { profileService } from '../../src/services/profileService';
 import { supabase } from '../../src/services/supabase';
-import { getStyles } from './styles';
 
 type CategoryRow = {
   id: number;
@@ -46,19 +52,6 @@ type NotificationRow = {
   [key: string]: any;
 };
 
-const CURRENT_USER_ID = '8d0faeae-769d-4af7-be4d-a47acff0c000';
-
-const toDisplayPrice = (value: DestinationRow['price']) => {
-  if (value === null || value === undefined || value === '') return '';
-  if (typeof value === 'number') return `$${value.toLocaleString()} / person`;
-
-  const text = String(value).trim();
-  if (!text) return '';
-  if (text.includes('/')) return text;
-  if (text.startsWith('$')) return `${text} / person`;
-  return text;
-};
-
 const toRating = (value: DestinationRow['rating']) => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   return 4.7;
@@ -66,9 +59,11 @@ const toRating = (value: DestinationRow['rating']) => {
 
 export default function HomeScreen() {
   const { width: screenWidth } = useWindowDimensions();
-  const [profile, setProfile] = useState<{ full_name: string } | null>(null);
-  const [isDarkMode, setIsDarkMode] = useState(true); // Trạng thái Sáng/Tối
+  const [profile, setProfile] = useState<{ full_name: string | null; nationality?: string | null } | null>(null);
+  const { isDark } = useTheme();
+  const { formatPricePerPerson } = useCurrency();
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [pendingRemindersCount, setPendingRemindersCount] = useState(0);
   const [searchText, setSearchText] = useState('');
 
   const searchRequestIdRef = React.useRef(0);
@@ -88,44 +83,29 @@ export default function HomeScreen() {
 
   const pulse = React.useRef(new Animated.Value(0)).current;
 
-  const onToggleTheme = useCallback(() => {
-    setIsDarkMode((prev) => !prev);
-  }, []);
-
   const onPressFilters = useCallback(() => {
     // placeholder
   }, []);
 
   // Lấy styles dựa trên state hiện tại
-  const styles = useMemo(() => getStyles({ isDarkMode, screenWidth }), [isDarkMode, screenWidth]);
+  const styles = useMemo(() => getStyles({ isDarkMode: isDark, screenWidth }), [isDark, screenWidth]);
+
+  const toDisplayPrice = useCallback(
+    (value: DestinationRow['price']) => {
+      const amount = parseMoneyToNumber(value);
+      if (amount === null) return '';
+      return formatPricePerPerson(amount);
+    },
+    [formatPricePerPerson]
+  );
 
   const fetchProfile = useCallback(async () => {
     setLoadingProfile(true);
     try {
-      const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-      if (userErr) {
-        console.warn('supabase.auth.getUser error:', userErr.message);
-        return;
-      }
-
-      const user = userRes.user;
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', user.id)
-        .single();
-
-      if (error) {
-        console.warn('profiles select error:', error.message);
-        return;
-      }
-
-      setProfile(data);
+      const currentProfile = await profileService.getCurrentProfile();
+      setProfile(currentProfile);
     } catch (err: any) {
-      console.warn('fetchProfile failed (network/premature close):', err?.message ?? err);
+      console.warn('fetchProfile failed:', err?.message ?? err);
     } finally {
       setLoadingProfile(false);
     }
@@ -189,12 +169,12 @@ export default function HomeScreen() {
     [handleSearch]
   );
 
-  const fetchUnreadNotifications = useCallback(async () => {
+  const fetchUnreadNotifications = useCallback(async (userId: string) => {
     try {
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .eq('user_id', CURRENT_USER_ID)
+        .eq('user_id', userId)
         .eq('is_read', false)
         .order('created_at', { ascending: false });
 
@@ -211,7 +191,7 @@ export default function HomeScreen() {
     }
   }, []);
 
-  const markAllNotificationsRead = useCallback(async () => {
+  const markAllNotificationsRead = useCallback(async (userId: string) => {
     const prev = notifications;
     setNotifications([]);
 
@@ -219,7 +199,7 @@ export default function HomeScreen() {
       const { error } = await supabase
         .from('notifications')
         .update({ is_read: true })
-        .eq('user_id', CURRENT_USER_ID)
+        .eq('user_id', userId)
         .eq('is_read', false);
 
       if (error) {
@@ -234,8 +214,21 @@ export default function HomeScreen() {
 
   const onPressBell = useCallback(async () => {
     router.push('/notifications' as any);
-    await markAllNotificationsRead();
+
+    const { data } = await supabase.auth.getUser();
+    const userId = data.user?.id;
+    if (userId) await markAllNotificationsRead(userId);
   }, [markAllNotificationsRead]);
+
+  const refreshPendingReminders = useCallback(async () => {
+    try {
+      const count = await reminderService.countPendingRemindersForCurrentUser();
+      setPendingRemindersCount(count);
+    } catch (err: any) {
+      console.warn('refreshPendingReminders failed:', err?.message ?? err);
+      setPendingRemindersCount(0);
+    }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -258,17 +251,26 @@ export default function HomeScreen() {
     let channel: RealtimeChannel | null = null;
 
     const init = async () => {
-      await fetchUnreadNotifications();
+      const { data, error } = await supabase.auth.getUser();
+      if (error) throw error;
+
+      const userId = data.user?.id;
+      if (!userId) {
+        setNotifications([]);
+        return;
+      }
+
+      await fetchUnreadNotifications(userId);
 
       channel = supabase
-        .channel(`notifications:${CURRENT_USER_ID}`)
+        .channel(`notifications:${userId}`)
         .on(
           'postgres_changes',
           {
             event: 'INSERT',
             schema: 'public',
             table: 'notifications',
-            filter: `user_id=eq.${CURRENT_USER_ID}`,
+            filter: `user_id=eq.${userId}`,
           },
           (payload) => {
             if (!isActive) return;
@@ -296,10 +298,51 @@ export default function HomeScreen() {
   }, [fetchUnreadNotifications]);
 
   useEffect(() => {
+    let isActive = true;
+    let channel: RealtimeChannel | null = null;
+
+    const init = async () => {
+      await refreshPendingReminders();
+
+      const { data, error } = await supabase.auth.getUser();
+      if (error) throw error;
+
+      const userId = data.user?.id;
+      if (!userId) return;
+
+      channel = supabase
+        .channel(`reminders:${userId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'reminders',
+            filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            if (!isActive) return;
+            void refreshPendingReminders();
+          }
+        )
+        .subscribe();
+    };
+
+    init().catch((err: any) => {
+      console.warn('reminders init failed:', err?.message ?? err);
+    });
+
+    return () => {
+      isActive = false;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [refreshPendingReminders]);
+
+  useEffect(() => {
     const animation = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 1800, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 1800, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 1800, useNativeDriver: Platform.OS !== 'web' }),
+        Animated.timing(pulse, { toValue: 0, duration: 1800, useNativeDriver: Platform.OS !== 'web' }),
       ])
     );
 
@@ -312,7 +355,7 @@ export default function HomeScreen() {
     ? `https://api.dicebear.com/7.x/avataaars/jpg?seed=${encodeURIComponent(displayName)}`
     : undefined;
 
-  const gradientColors: readonly [ColorValue, ColorValue, ColorValue] = isDarkMode
+  const gradientColors: readonly [ColorValue, ColorValue, ColorValue] = isDark
     ? [ExploreEaseColors.background, ExploreEaseColors.background, 'rgba(10,25,41,0.95)']
     : ['#f8fafc', '#f8fafc', 'rgba(248,250,252,0.95)'];
 
@@ -343,25 +386,25 @@ export default function HomeScreen() {
           id: d.id,
           name: d.name,
           location: d.location,
-          price: toDisplayPrice(d.price) || '$—',
+          price: toDisplayPrice(d.price) || '—',
           imageUrl: d.image_url as string,
           rating: toRating(d.rating),
         })),
-    [popular]
+    [popular, toDisplayPrice]
   );
 
   return (
     <LinearGradient colors={gradientColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.mainContainer}>
-      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
       {/* Animated background gradient elements */}
-      <View pointerEvents="none" style={styles.bgBlobContainer}>
+      <View style={[styles.bgBlobContainer, { pointerEvents: 'none' }]}>
         <Animated.View style={[styles.bgCircle1, blobAnimStyle1]} />
         <Animated.View style={[styles.bgCircle2, blobAnimStyle2]} />
       </View>
 
       <SafeAreaView style={{ flex: 1 }}>
         {isLoading ? (
-          <View pointerEvents="none" style={styles.loadingIndicator} />
+          <View style={[styles.loadingIndicator, { pointerEvents: 'none' }]} />
         ) : null}
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           <View style={styles.pageContent}>
@@ -369,15 +412,14 @@ export default function HomeScreen() {
               styles={styles}
               name={displayName}
               avatarUrl={avatarUrl}
-              isDarkMode={isDarkMode}
-              onToggleTheme={onToggleTheme}
-              hasNotifications={notifications.length > 0}
+              isDarkMode={isDark}
+              badgeCount={notifications.length + pendingRemindersCount}
               onPressNotifications={onPressBell}
             />
 
             <SearchBar
               styles={styles}
-              isDarkMode={isDarkMode}
+              isDarkMode={isDark}
               value={searchText}
               onChangeText={onChangeSearchText}
               onPressFilters={onPressFilters}
@@ -385,7 +427,7 @@ export default function HomeScreen() {
 
             <CategoriesCarousel
               styles={styles}
-              isDarkMode={isDarkMode}
+              isDarkMode={isDark}
               categories={categoryItems}
               initialActiveId={categoryItems[0]?.id}
             />
@@ -395,10 +437,24 @@ export default function HomeScreen() {
                 styles={styles}
                 title={featured.name}
                 location={featured.location}
-                price={toDisplayPrice(featured.price) || '$—'}
+                price={toDisplayPrice(featured.price) || '—'}
                 rating={toRating(featured.rating)}
                 imageUrl={featured.image_url ?? ''}
-                onPress={() => {}}
+                onPress={() => {
+                  router.push(
+                    {
+                      pathname: '/destination/[id]',
+                      params: {
+                        id: String(featured.id),
+                        name: featured.name,
+                        location: featured.location,
+                        price: toDisplayPrice(featured.price) || '—',
+                        rating: String(toRating(featured.rating)),
+                        imageUrl: featured.image_url ?? '',
+                      },
+                    } as any
+                  );
+                }}
               />
             ) : null}
 

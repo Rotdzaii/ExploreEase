@@ -61,7 +61,8 @@ export const destinationService = {
   async getDestinationById(destinationId: string) {
     const { data, error } = await supabase
       .from('destinations')
-      .select('*')
+      // explicit `address` to reflect newly-added DB field
+      .select('*, address')
       .eq('id', destinationId)
       .single();
 
@@ -81,15 +82,134 @@ export const destinationService = {
     return data;
   },
 
-  async getReviews(destinationId: string) {
+  async getDestinationsByInterests(interests: string[], limit: number = 20) {
+    const normalized = (interests ?? []).map((s) => s.trim()).filter(Boolean);
+    if (normalized.length === 0) return [];
+
     const { data, error } = await supabase
+      .from('destinations')
+      .select('*, categories(name)')
+      // requires: destinations.tags is a Postgres text[] column
+      .overlaps('tags', normalized)
+      .order('rating', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return data;
+  },
+
+  async getDestinationsForCurrentUserInterests(limit: number = 20) {
+    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+    if (userErr) throw userErr;
+
+    const userId = userRes.user?.id;
+    if (!userId) throw new Error('Not authenticated');
+
+    const { data: profile, error: profileErr } = await supabase
+      .from('profiles')
+      .select('interests')
+      .eq('id', userId)
+      .single();
+
+    if (profileErr) throw profileErr;
+
+    const interests = Array.isArray((profile as any)?.interests) ? ((profile as any).interests as string[]) : [];
+    return this.getDestinationsByInterests(interests, limit);
+  },
+
+  async getReviewsPage(destinationId: string, input?: { from?: number; limit?: number }) {
+    const from = Math.max(0, Number(input?.from ?? 0));
+    const limit = Math.min(50, Math.max(1, Number(input?.limit ?? 10)));
+    const to = from + limit - 1;
+
+    // Fetch only snake_case columns from `reviews`, then fetch related `profiles` separately.
+    // This avoids PostgREST 400 errors when the FK relationship name isn't exposed/recognized.
+    const reviewsRes = await supabase
       .from('reviews')
-      .select('id, user_id, destination_id, rating, comment, created_at, profiles(full_name, avatar_url)')
+      .select('id, user_id, destination_id, rating, comment, created_at', { count: 'exact' })
+      .eq('destination_id', destinationId)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (reviewsRes.error) throw reviewsRes.error;
+
+    const rows = (reviewsRes.data ?? []) as ReviewRow[];
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id).filter(Boolean)));
+
+    if (userIds.length === 0) {
+      return {
+        rows,
+        totalCount: typeof reviewsRes.count === 'number' ? reviewsRes.count : null,
+      };
+    }
+
+    const { data: profiles, error: profilesErr } = await supabase
+      .from('profiles')
+      .select('id, full_name, avatar_url')
+      .in('id', userIds);
+
+    if (profilesErr) {
+      return {
+        rows,
+        totalCount: typeof reviewsRes.count === 'number' ? reviewsRes.count : null,
+      };
+    }
+
+    const profileById = new Map<string, { full_name?: string | null; avatar_url?: string | null }>();
+    for (const p of profiles ?? []) {
+      const id = (p as any)?.id as string | undefined;
+      if (!id) continue;
+      profileById.set(id, {
+        full_name: (p as any)?.full_name ?? null,
+        avatar_url: (p as any)?.avatar_url ?? null,
+      });
+    }
+
+    const merged = rows.map((r) => ({
+      ...r,
+      profiles: profileById.get(r.user_id) ?? null,
+    }));
+
+    return {
+      rows: merged,
+      totalCount: typeof reviewsRes.count === 'number' ? reviewsRes.count : null,
+    };
+  },
+
+  async getReviews(destinationId: string) {
+    const reviewsRes = await supabase
+      .from('reviews')
+      .select('id, user_id, destination_id, rating, comment, created_at')
       .eq('destination_id', destinationId)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    return data as ReviewRow[];
+    if (reviewsRes.error) throw reviewsRes.error;
+
+    const rows = (reviewsRes.data ?? []) as ReviewRow[];
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id).filter(Boolean)));
+    if (userIds.length === 0) return rows;
+
+    const { data: profiles, error: profilesErr } = await supabase
+      .from('profiles')
+      .select('id, full_name, avatar_url')
+      .in('id', userIds);
+
+    if (profilesErr) return rows;
+
+    const profileById = new Map<string, { full_name?: string | null; avatar_url?: string | null }>();
+    for (const p of profiles ?? []) {
+      const id = (p as any)?.id as string | undefined;
+      if (!id) continue;
+      profileById.set(id, {
+        full_name: (p as any)?.full_name ?? null,
+        avatar_url: (p as any)?.avatar_url ?? null,
+      });
+    }
+
+    return rows.map((r) => ({
+      ...r,
+      profiles: profileById.get(r.user_id) ?? null,
+    }));
   },
 
   async submitReview(reviewData: SubmitReviewInput) {

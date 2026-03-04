@@ -43,6 +43,8 @@ const fetchWithTimeout: typeof fetch = async (input, init) => {
 const rawSupabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const rawSupabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
+console.log('Supabase Check:', { url: rawSupabaseUrl, key: !!rawSupabaseAnonKey });
+
 const isValidHttpUrl = (value?: string) => {
   if (!value) return false;
   try {
@@ -72,8 +74,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
   auth: {
     storage: Platform.OS !== 'web' ? AsyncStorage : undefined,
+    flowType: 'pkce',
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    detectSessionInUrl: true,
   },
 });

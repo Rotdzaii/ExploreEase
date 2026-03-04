@@ -1,0 +1,36 @@
+diff --git a/node_modules/react-native-web/src/exports/TouchableWithoutFeedback/index.js b/node_modules/react-native-web/src/exports/TouchableWithoutFeedback/index.js
+--- a/node_modules/react-native-web/src/exports/TouchableWithoutFeedback/index.js
++++ b/node_modules/react-native-web/src/exports/TouchableWithoutFeedback/index.js
+@@ -114,7 +114,7 @@ function TouchableWithoutFeedback(props: Props, forwardedRef: any) {
+   const supportedProps = pickProps(props);
+   supportedProps.accessibilityDisabled = disabled;
+   supportedProps.focusable = !disabled && focusable !== false;
+-  supportedProps.ref = useMergeRefs(forwardedRef, hostRef, element.ref);
++  supportedProps.ref = useMergeRefs(forwardedRef, hostRef, element.props.ref);
+ 
+   const elementProps = Object.assign(supportedProps, pressEventHandlers);
+ 
+diff --git a/node_modules/react-native-web/dist/exports/TouchableWithoutFeedback/index.js b/node_modules/react-native-web/dist/exports/TouchableWithoutFeedback/index.js
+--- a/node_modules/react-native-web/dist/exports/TouchableWithoutFeedback/index.js
++++ b/node_modules/react-native-web/dist/exports/TouchableWithoutFeedback/index.js
+@@ -63,7 +63,7 @@ function TouchableWithoutFeedback(props, forwardedRef) {
+   var supportedProps = pickProps(props);
+   supportedProps.accessibilityDisabled = disabled;
+   supportedProps.focusable = !disabled && focusable !== false;
+-  supportedProps.ref = useMergeRefs(forwardedRef, hostRef, element.ref);
++  supportedProps.ref = useMergeRefs(forwardedRef, hostRef, element.props.ref);
+   var elementProps = Object.assign(supportedProps, pressEventHandlers);
+   return /*#__PURE__*/React.cloneElement(element, elementProps, ...children);
+ }
+diff --git a/node_modules/react-native-web/dist/cjs/exports/TouchableWithoutFeedback/index.js b/node_modules/react-native-web/dist/cjs/exports/TouchableWithoutFeedback/index.js
+--- a/node_modules/react-native-web/dist/cjs/exports/TouchableWithoutFeedback/index.js
++++ b/node_modules/react-native-web/dist/cjs/exports/TouchableWithoutFeedback/index.js
+@@ -68,7 +68,7 @@ function TouchableWithoutFeedback(props, forwardedRef) {
+   var supportedProps = pickProps(props);
+   supportedProps.accessibilityDisabled = disabled;
+   supportedProps.focusable = !disabled && focusable !== false;
+-  supportedProps.ref = (0, _useMergeRefs.default)(forwardedRef, hostRef, element.ref);
++  supportedProps.ref = (0, _useMergeRefs.default)(forwardedRef, hostRef, element.props.ref);
+   var elementProps = Object.assign(supportedProps, pressEventHandlers);
+   return /*#__PURE__*/React.cloneElement(element, elementProps, ...children);
+ }
