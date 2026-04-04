@@ -1,10 +1,13 @@
 import { GlobalToastHost } from '@/components/GlobalToastHost';
+import { useNetwork } from '@/hooks/useNetwork';
 import { useProtectedRoute } from '@/hooks/useProtectedRoute';
 import { AuthProvider } from '@/src/context/auth';
 import { CurrencyProvider } from '@/src/context/currency';
 import { ThemeProvider } from '@/src/context/theme';
 import { initializeLocalNotificationsAsync } from '@/src/services/localNotificationService';
+import { offlineSyncService } from '@/src/services/offlineSyncService';
 import { useLanguageStore } from '@/src/store/useLanguageStore';
+import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { Stack } from 'expo-router';
 import React, { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -30,11 +33,43 @@ function AuthRouteGate() {
 
 export default function RootLayout() {
   const initializeLanguage = useLanguageStore((s) => s.initializeLanguage);
+  const addNotification = useNotificationStore((s) => s.addNotification);
+  const { isOnline } = useNetwork();
 
   useEffect(() => {
     void initializeLanguage();
     void initializeLocalNotificationsAsync();
   }, [initializeLanguage]);
+
+  useEffect(() => {
+    if (!isOnline) return;
+
+    let cancelled = false;
+
+    const run = async () => {
+      try {
+        const result = await offlineSyncService.syncPendingReviews();
+        if (cancelled) return;
+
+        if (result.syncedCount > 0) {
+          addNotification({
+            message: `Synced ${result.syncedCount} pending review(s).`,
+            type: 'success',
+            durationMs: 3200,
+          });
+        }
+      } catch (error: any) {
+        if (cancelled) return;
+        console.warn('offline review sync failed:', error?.message ?? error);
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [addNotification, isOnline]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

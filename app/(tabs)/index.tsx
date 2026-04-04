@@ -1,13 +1,16 @@
 import { useCurrency } from '@/src/context/currency';
 import { useTheme } from '@/src/context/theme';
 import { reminderService } from '@/src/services/reminderService';
+import { transcribeAudioUri } from '@/src/services/speechService';
 import { getStyles } from '@/src/styles/homeStyles';
 import { parseMoneyToNumber } from '@/utils/format';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+    Alert,
     Animated,
     Platform,
     SafeAreaView,
@@ -65,6 +68,8 @@ const toRating = (value: DestinationRow['rating']) => {
   return 4.7;
 };
 
+type VoiceSearchState = 'idle' | 'recording' | 'processing';
+
 export default function HomeScreen() {
   const { width: screenWidth } = useWindowDimensions();
   const [profile, setProfile] = useState<{ full_name: string | null; nationality?: string | null } | null>(null);
@@ -73,10 +78,12 @@ export default function HomeScreen() {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [pendingRemindersCount, setPendingRemindersCount] = useState(0);
   const [searchText, setSearchText] = useState('');
+  const [voiceSearchState, setVoiceSearchState] = useState<VoiceSearchState>('idle');
   const timeOfDayPreference = useRecommendationPreferencesStore((s) => s.timeOfDayPreference);
   const setTimeOfDayPreference = useRecommendationPreferencesStore((s) => s.setTimeOfDayPreference);
 
   const searchRequestIdRef = React.useRef(0);
+  const recordingRef = React.useRef<Audio.Recording | null>(null);
 
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadingDestinations, setLoadingDestinations] = useState(true);
@@ -214,6 +221,128 @@ export default function HomeScreen() {
     [handleSearch]
   );
 
+  const setRecordingAudioMode = useCallback(async (recordingEnabled: boolean) => {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: recordingEnabled,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+      interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    });
+  }, []);
+
+  const startVoiceRecording = useCallback(async () => {
+    if (voiceSearchState !== 'idle') return;
+
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Microphone Permission Required',
+          'Please allow microphone access to use voice search.'
+        );
+        return;
+      }
+
+      await setRecordingAudioMode(true);
+
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await recording.startAsync();
+
+      recordingRef.current = recording;
+      setVoiceSearchState('recording');
+    } catch (err: any) {
+      console.warn('startVoiceRecording failed:', err?.message ?? err);
+      recordingRef.current = null;
+      setVoiceSearchState('idle');
+      setRecordingAudioMode(false).catch(() => {
+        // noop
+      });
+      Alert.alert('Voice Search Unavailable', 'Could not start recording. Please try again.');
+    }
+  }, [setRecordingAudioMode, voiceSearchState]);
+
+  const stopVoiceRecordingAndTranscribe = useCallback(async () => {
+    const recording = recordingRef.current;
+    if (!recording) {
+      setVoiceSearchState('idle');
+      return;
+    }
+
+    setVoiceSearchState('processing');
+    recordingRef.current = null;
+
+    let recordingUri: string | null = null;
+
+    try {
+      await recording.stopAndUnloadAsync();
+      recordingUri = recording.getURI();
+    } catch (err: any) {
+      console.warn('stopVoiceRecording failed:', err?.message ?? err);
+    } finally {
+      await setRecordingAudioMode(false).catch(() => {
+        // noop
+      });
+    }
+
+    if (!recordingUri) {
+      setVoiceSearchState('idle');
+      Alert.alert('Voice Search Failed', 'No audio file was captured. Please try again.');
+      return;
+    }
+
+    try {
+      const transcript = await transcribeAudioUri(recordingUri, {
+        languageCode: 'vi-VN',
+        alternativeLanguageCodes: ['en-US'],
+        maxAlternatives: 1,
+      });
+
+      const query = transcript.trim();
+      if (!query) {
+        Alert.alert('No Speech Detected', 'Please speak clearly and try again.');
+        return;
+      }
+
+      setSearchText(query);
+      await handleSearch(query);
+    } catch (err: any) {
+      console.warn('voice transcription failed:', err?.message ?? err);
+      Alert.alert(
+        'Voice Search Failed',
+        err?.message ?? 'Unable to transcribe audio. Please check your API key and try again.'
+      );
+    } finally {
+      setVoiceSearchState('idle');
+    }
+  }, [handleSearch, setRecordingAudioMode]);
+
+  const onPressVoiceSearch = useCallback(() => {
+    if (voiceSearchState === 'processing') return;
+
+    if (voiceSearchState === 'recording') {
+      void stopVoiceRecordingAndTranscribe();
+      return;
+    }
+
+    void startVoiceRecording();
+  }, [startVoiceRecording, stopVoiceRecordingAndTranscribe, voiceSearchState]);
+
+  const voiceStatusText = useMemo(() => {
+    if (voiceSearchState === 'recording') {
+      return 'Listening... tap the microphone again to stop.';
+    }
+
+    if (voiceSearchState === 'processing') {
+      return 'Transcribing your voice...';
+    }
+
+    return null;
+  }, [voiceSearchState]);
+
   const fetchUnreadNotifications = useCallback(async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -286,6 +415,23 @@ export default function HomeScreen() {
       void mounted;
     };
   }, [fetchDestinations, fetchProfile]);
+
+  useEffect(() => {
+    return () => {
+      const recording = recordingRef.current;
+      recordingRef.current = null;
+
+      if (recording) {
+        recording.stopAndUnloadAsync().catch(() => {
+          // noop
+        });
+      }
+
+      setRecordingAudioMode(false).catch(() => {
+        // noop
+      });
+    };
+  }, [setRecordingAudioMode]);
 
   useEffect(() => {
     void fetchPersonalizedRecommendations();
@@ -528,6 +674,10 @@ export default function HomeScreen() {
               value={searchText}
               onChangeText={onChangeSearchText}
               onPressFilters={onPressFilters}
+              onPressVoiceSearch={onPressVoiceSearch}
+              disableVoiceSearch={voiceSearchState === 'processing'}
+              voiceSearchState={voiceSearchState}
+              voiceStatusText={voiceStatusText}
             />
 
             <CategoriesCarousel

@@ -156,7 +156,7 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 
     [/] Offline caching for saved items, profile: Hiện mới có caching cho FX/theme; chưa cache favorites/profile theo yêu cầu.
 
-        [ ] Auto-sync changes when back online: Cần sử dụng thư viện NetInfo để detect mạng và tự động đẩy các thay đổi (ví dụ: đánh dấu yêu thích khi offline) lên Supabase khi có mạng lại.
+        [/] Auto-sync changes when back online: Đã tích hợp NetInfo + AsyncStorage queue cho Review. Khi offline sẽ lưu review cục bộ; khi online lại app tự đồng bộ queue lên bảng reviews của Supabase.
 
         [ ] Limited offline access: Cho phép xem lại thông tin chi tiết các địa danh đã từng "đi qua" (cached) va event mà không cần mạng.
 
@@ -209,7 +209,7 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 13. ADVANCED SEARCH & SMART DISCOVERY (5%)
 
     13.1 Voice Search
-        [ ] Tìm kiếm bằng giọng nói (Google Speech API): * Status: Cậu có thể tận dụng WhisperX từ dự án Thesis trước đó hoặc dùng Google Speech-to-Text.
+        [/] Tìm kiếm bằng giọng nói (Google Speech API): * Status: Đã tích hợp nút mic + luồng ghi âm xin quyền microphone trên Home, gọi Groq Whisper transcription API và tự động đổ transcript vào ô search để chạy filter.
 
         [ ] Gợi ý kết quả theo thời gian thực: Cần logic stream kết quả tìm kiếm ngay khi tiếng nói được chuyển thành văn bản.
 
@@ -255,3 +255,4 @@ Status: Cần một bảng activities ghi lại các trigger từ Reviews và Bo
 ## Future Enhancements (Cải tiến trong tương lai)
 - [ ] **Profile Onboarding Guard:** Thêm Global Guard lớp thứ 2 để ép buộc user mới đăng ký phải cập nhật đầy đủ thông tin (tên, avatar) trước khi vào trang chủ.
 - [ ] Anti replay attack
+- [ ] - [ ] **Realtime Voice Streaming:** Nâng cấp Voice Search, hiển thị chữ ngay lập tức theo thời gian thực (streaming) khi người dùng đang nói thay vì đợi kết thúc.

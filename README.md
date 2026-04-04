@@ -61,10 +61,12 @@ Dự án có hỗ trợ đăng nhập Google, có thể cấu hình thêm:
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=
 EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=
 EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=
+EXPO_PUBLIC_GROQ_API_KEY=
 ```
 
 Lưu ý:
 - Lấy các Client ID này từ Google Cloud Console (OAuth 2.0 Client IDs).
+- `EXPO_PUBLIC_GROQ_API_KEY` lấy từ Groq Console (API Keys) để gọi Whisper transcription.
 - Sau khi thay đổi `.env`, hãy dừng và chạy lại Expo để nạp biến môi trường mới.
 
 ## 4. Hướng dẫn chạy dự án (Running the Project)

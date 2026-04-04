@@ -26,12 +26,14 @@ import { YouMightAlsoLike, type YouMightAlsoLikeItem } from '@/components/home/Y
 import { ModerationModal, RatingDistribution, ReviewCard, ReviewForm } from '@/components/reviews';
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useLocation } from '@/hooks/useLocation';
+import { useNetwork } from '@/hooks/useNetwork';
 import { useCurrency } from '@/src/context/currency';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import { calculateAverageRating, destinationService, type ReviewRow } from '@/src/services/destinationService';
 import { favoritesService } from '@/src/services/favoritesService';
 import { itineraryService } from '@/src/services/itineraryService';
+import { offlineSyncService } from '@/src/services/offlineSyncService';
 import { recommendationService, resolveTimeOfDayPreference, type PersonalizedRecommendationsResult } from '@/src/services/recommendationService';
 import { reviewService } from '@/src/services/reviewService';
 import { supabase } from '@/src/services/supabase';
@@ -194,6 +196,7 @@ export default function DestinationDetailScreen() {
   const destinationId = params.id ? String(params.id) : '';
 
   const { location, errorMsg: locationErrorMsg, isLoading: isLoadingLocation } = useLocation();
+  const { isOnline } = useNetwork();
   const [destinationCoords, setDestinationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [loadingDestination, setLoadingDestination] = useState(false);
   const [destinationPrice, setDestinationPrice] = useState<unknown>(null);
@@ -1053,6 +1056,39 @@ export default function DestinationDetailScreen() {
       return;
     }
 
+    const normalizedComment = draftComment.trim() ? draftComment.trim() : null;
+
+    if (!isOnline) {
+      try {
+        await offlineSyncService.enqueuePendingReview({
+          user_id: currentUserId,
+          destination_id: destinationId,
+          rating,
+          comment: normalizedComment,
+          imageUrls: [],
+        });
+
+        setDraftComment('');
+        setDraftRating(5);
+        setDraftPhotoAssets([]);
+        setIsWritingReview(false);
+
+        addNotification({
+          message: 'You are offline. Review saved locally and will sync later.',
+          type: 'warning',
+          durationMs: 4200,
+        });
+      } catch (error: any) {
+        const reason = String(error?.message ?? '').trim() || t('review.error.genericTryAgain');
+        addNotification({
+          message: t('review.error.submitFailed', { reason }),
+          type: 'error',
+          durationMs: 4200,
+        });
+      }
+      return;
+    }
+
     setSubmittingReview(true);
     try {
       const uploadedPhotoUrls: string[] = [];
@@ -1103,7 +1139,7 @@ export default function DestinationDetailScreen() {
         destinationService.submitReview({
           destination_id: destinationId,
           rating,
-          comment: draftComment.trim() ? draftComment.trim() : null,
+          comment: normalizedComment,
           imageUrls: uploadedPhotoUrls,
         }),
         15000,
@@ -1156,6 +1192,7 @@ export default function DestinationDetailScreen() {
     draftComment,
     draftPhotoAssets,
     draftRating,
+    isOnline,
     promptLogin,
     refreshReviews,
     t,

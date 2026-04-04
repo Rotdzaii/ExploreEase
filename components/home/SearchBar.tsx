@@ -2,7 +2,9 @@ import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import React, { useState } from 'react';
-import { Platform, Pressable, TextInput, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, Text, TextInput, View } from 'react-native';
+
+type VoiceSearchState = 'idle' | 'recording' | 'processing';
 
 type SearchBarProps = {
   styles: any;
@@ -11,6 +13,10 @@ type SearchBarProps = {
   value?: string;
   onChangeText?: (text: string) => void;
   onPressFilters?: () => void;
+  voiceSearchState?: VoiceSearchState;
+  voiceStatusText?: string | null;
+  onPressVoiceSearch?: () => void;
+  disableVoiceSearch?: boolean;
 };
 
 export function SearchBar({
@@ -20,8 +26,14 @@ export function SearchBar({
   value,
   onChangeText,
   onPressFilters,
+  voiceSearchState = 'idle',
+  voiceStatusText,
+  onPressVoiceSearch,
+  disableVoiceSearch = false,
 }: SearchBarProps) {
   const [focused, setFocused] = useState(false);
+  const isRecording = voiceSearchState === 'recording';
+  const isProcessing = voiceSearchState === 'processing';
 
   return (
     <View style={styles.searchContainer}>
@@ -45,6 +57,38 @@ export function SearchBar({
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
           />
+
+          {onPressVoiceSearch ? (
+            <Pressable
+              style={({ pressed, hovered }) => [
+                styles.searchFilterBtn,
+                isRecording
+                  ? {
+                      backgroundColor: isDarkMode ? 'rgba(239,68,68,0.24)' : 'rgba(239,68,68,0.15)',
+                      borderWidth: 1,
+                      borderColor: isDarkMode ? 'rgba(248,113,113,0.7)' : 'rgba(220,38,38,0.45)',
+                    }
+                  : null,
+                (Platform.OS === 'web' && hovered) ? { transform: [{ scale: 1.03 }], opacity: 0.95 } : null,
+                pressed ? { opacity: 0.85, transform: [{ scale: 0.98 }] } : null,
+              ]}
+              onPress={onPressVoiceSearch}
+              disabled={disableVoiceSearch}
+              accessibilityRole="button"
+              accessibilityLabel={isRecording ? 'Stop voice search' : 'Start voice search'}
+            >
+              {isProcessing ? (
+                <ActivityIndicator size="small" color={ExploreEaseColors.primary} />
+              ) : (
+                <MaterialCommunityIcons
+                  name={isRecording ? 'microphone' : 'microphone-outline'}
+                  size={18}
+                  color={isRecording ? '#ef4444' : (isDarkMode ? '#94a3b8' : '#64748b')}
+                />
+              )}
+            </Pressable>
+          ) : null}
+
           <Pressable
             style={({ pressed, hovered }) => [
               styles.searchFilterBtn,
@@ -62,6 +106,29 @@ export function SearchBar({
           </Pressable>
         </View>
       </BlurView>
+
+      {voiceStatusText ? (
+        <View style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 }}>
+          {isProcessing ? (
+            <ActivityIndicator size="small" color={ExploreEaseColors.primary} />
+          ) : (
+            <MaterialCommunityIcons
+              name={isRecording ? 'record-circle-outline' : 'information-outline'}
+              size={14}
+              color={isRecording ? '#ef4444' : (isDarkMode ? '#94a3b8' : '#64748b')}
+            />
+          )}
+          <Text
+            style={{
+              fontSize: 12,
+              fontWeight: '700',
+              color: isRecording ? (isDarkMode ? '#fca5a5' : '#b91c1c') : (isDarkMode ? '#94a3b8' : '#64748b'),
+            }}
+          >
+            {voiceStatusText}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
