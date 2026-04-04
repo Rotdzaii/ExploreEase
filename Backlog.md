@@ -2,15 +2,15 @@
     1.1 Registration & Login
         [x] Email/password sign-in (Supabase Auth)
 
-        [x] Support Google sign-in (Cần cấu hình Client ID trên Google Cloud Console)
+        [x] Support Google sign-in: Đã tích hợp luồng đăng nhập Google qua Supabase Auth; Client ID được cấu hình theo từng môi trường trên Google Cloud Console.
 
-        [ ] Email/OTP verification flow
+        [/] Email/OTP verification flow
 
         [x] Form validations (Regex email, strong password check: 8+ ký tự, 1 hoa, 1 số)
 
-        [ ] Forgot password and recovery via email trigger
+        [x] Forgot password and recovery via email trigger
 
-        [x] UI Logic: Login button disabled until fields are filled
+        [/] UI Logic: Login button disabled until fields are filled
 
         [x] Logout implementation
 
@@ -19,18 +19,18 @@
 
         [x] Profile fields: Name, age, gender, travel style
 
-        [/] Select interests: Food, culture, shopping, nature, adventure (Đã có bảng, cần UI chọn)
+        [x] Select interests: Food, culture, shopping, nature, adventure (Đã có UI chọn và lưu vào profiles.interests)
 
         [x] Edit profile and preferences anytime logic
 
 2. LOCATION-BASED DISCOVERY (5%)
     2.1 GPS Integration
 
-        [x] Real-time location tracking: Đã tích hợp expo-location để lấy tọa độ hiện tại của thiết bị.
+        [/] Real-time location tracking: Đã tích hợp expo-location để lấy tọa độ hiện tại của thiết bị.
 
         [x] Handle location permissions properly (Android 12+): Đã xử lý yêu cầu quyền ACCESS_FINE_LOCATION và ACCESS_COARSE_LOCATION.
 
-        [ ] Manual location override for future planning: Cần thêm tính năng cho phép User chọn một vị trí khác trên bản đồ để xem các gợi ý tại đó thay vì vị trí thực tế hiện tại.
+        [x] Manual location override for future planning: Đã có ô nhập vị trí thủ công, geocoding địa chỉ và chuyển đổi giữa GPS thật với vị trí mục tiêu do người dùng chọn.
 
     2.2 Map View
 
@@ -38,18 +38,18 @@
 
         [/] Display: Points of interest, events, recommended places nearby: Đã hiển thị danh sách, nhưng cần logic lọc "Nearby" (bán kính < 5km) để khớp với yêu cầu "Display".
 
-        [/] Distance calculation and route navigation: * Distance: Cần cài đặt hàm tính khoảng cách giữa User và địa danh.
+        [x] Distance calculation and route navigation: * Distance: Đã có hàm Haversine + formatDistance để tính/hiển thị khoảng cách.
 
         Navigation: Đã có logic mở Google Maps ngoại vi (Module 4.3).
 
 3. INTEREST MAPPING & PERSONALIZATION (10%)
 
     3.1 Smart Matching
-        [ / ] Match recommendations with user preferences & activity history:
+        [/] Match recommendations with user preferences & activity history:
 
 Status: Đã có bảng profiles.interests. Cần viết hàm getRecommendedDestinations để thực hiện phép JOIN giữa sở thích người dùng và thể loại của địa danh.
 
-        [ ] Context filters: time of day, weather, seasonal trends:
+        [/] Context filters: time of day, weather, seasonal trends:
 
 Status: Cần tích hợp OpenWeather API để gợi ý địa điểm trong nhà khi trời mưa, hoặc gợi ý quán cafe/bar theo khung giờ (Time of day).
 
@@ -58,15 +58,15 @@ Status: Cần tích hợp OpenWeather API để gợi ý địa điểm trong nh
 Status: Ở mức đồ án, có thể dùng thuật toán Content-based Filtering đơn giản hoặc tích hợp OpenAI Embedding (nếu làm phần Module 13).
 
         3.2 Experience-Aware Suggestions
-            [ / ] Solo vs family suggestions:
+            [/] Solo vs family suggestions:
 
 Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suitability vào bảng destinations để lọc nội dung khớp với phong cách đi một mình hay đi cùng gia đình.
 
-            [ ] Show similar attractions (“You might also like”):
+            [x] Show similar attractions (“You might also like”):
 
-            Status: Cần triển khai Component ở cuối trang Chi tiết, truy vấn các địa danh có cùng category_id.
+            Status: Đã triển khai ở Home, Destination Detail và Event Detail; có lọc ngữ cảnh nội dung đang xem và loại bỏ chính item hiện tại khỏi danh sách gợi ý.
 
-            [ / ] Prioritized results based on reviews and proximity:
+            [/] Prioritized results based on reviews and proximity:
 
             Status: Đã có bảng reviews và tọa độ GPS. Cần thực hiện logic sắp xếp kết hợp: ORDER BY rating DESC, distance ASC.
 
@@ -84,14 +84,14 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 
             Distance: Đã có tọa độ, cần hàm lọc theo bán kính.
 
-        [/] Sorting: relevance, top-rated, A-Z: Đã có logic order trong Supabase, cần gắn vào UI.
+        [x] Sorting: relevance, top-rated, A-Z: Đã gắn đầy đủ vào UI Explore và áp dụng trực tiếp lên truy vấn dữ liệu.
 
-        [ ] Search suggestions with autocomplete: Cần tích hợp Debounce search để gợi ý khi user gõ.
+        [x] Search suggestions with autocomplete: Đã có debounce + autocomplete theo thời gian thực khi người dùng nhập từ khóa.
 
     4.3 Detail Page
         [x] Images, map, ratings, description, pricing: (Đã xong, bao gồm cả FX quy đổi tiền tệ).
 
-        [/] Bookmarking/favorites: Đã có bảng bookmarks trong SQL, cần gắn icon Trái tim để toggle trạng thái.
+        [x] Bookmarking/favorites: Đã có toggle icon Trái tim và lưu favorites.
 
         [x] “Get directions” integration with Google Maps: Đã dùng Linking để mở tọa độ trên Google Maps.
 
@@ -100,33 +100,33 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 5. EVENT MANAGEMENT
 
     5.1 Discovery
-        [/] Filter by: date, type, free/paid, distance: Cần hoàn thiện UI Filter chuyên dụng cho Sự kiện.
+        [x] Filter by: date, type, free/paid, distance: Đã hoàn thiện filter trong Explore (ngày, loại sự kiện, miễn phí/trả phí, khoảng cách < 5km) và nối với truy vấn dữ liệu.
 
-        [/] Event lifecycle management:
+        [x] Event lifecycle management: Đã quản lý vòng đời sự kiện theo thời gian thực dựa trên start_time/end_time trong service và UI.
 
-        [x] incoming, ongoing, completed status (Đã có logic trong SQL).
+        [x] incoming, ongoing, completed status: Đã tính trạng thái động cho danh sách và trang chi tiết sự kiện.
 
-        [ ] Countdown timers for upcoming events: Cần dùng setInterval hoặc thư viện countdown ở UI.
+        [x] Countdown timers for upcoming events: Đã thêm bộ đếm ngược theo giây trên trang chi tiết cho sự kiện sắp diễn ra.
 
-        [/] Share button & bookmarking: Nút Share dùng Share API của React Native.
+        [ ] Share button & bookmarking.
 
-        [/] Search by name and filter by status: Đã có câu lệnh ILIKE trong Supabase.
+        [x] Search by name and filter by status: Đã hỗ trợ tìm theo tên sự kiện và lọc trạng thái incoming/ongoing/completed.
     5.2 Creation
-        [/] Event form: title, category, location, time, price, image: Đã có Schema SQL, cần làm UI Form.
+        [x] Event form: title, category, location, time, price, image.
 
-        [x] Date logic: end date > start date: Cần thêm Validation ở Frontend trước khi gửi lên.
+        [x] Date logic: end date > start date.
 
         [ ] Admin approval before listing: Cần cột is_approved (boolean) trong bảng events.
 
-        [/] Edit/delete own event: Đã có chính sách RLS owner-only, cần thêm UI nút Sửa/Xóa.
+        [x] Edit/delete own event.
 
 6. PAGINATION (5%)
 
-        [/] Infinite scroll for long lists: Hiện tại đang dùng FlatList, cần thêm hàm onEndReached để fetch thêm data từ Supabase khi kéo xuống cuối.
+        [x] Infinite scroll for long lists: Đã áp dụng tải thêm dữ liệu cho danh sách khám phá bằng cơ chế preload theo cuộn.
 
-        [ ] Optimize: attractions, events, reviews: Sử dụng limit và offset trong câu lệnh SQL để không tải toàn bộ database một lúc.
+        [x] Optimize: attractions, events, reviews: Đã dùng limit/offset cho attractions, events và reviews để tránh tải toàn bộ dữ liệu trong một lần.
 
-        [ ] Preload next page on scroll detection: Thiết lập onEndReachedThreshold (ví dụ: 0.5) để app tự tải trang tiếp theo trước khi người dùng kéo tới đáy.
+        [x] Preload next page on scroll detection: Đã thiết lập ngưỡng preload 0.5 trong luồng cuộn để tự tải trang kế tiếp mượt trước khi chạm đáy danh sách.
 
 7. RATING & REVIEW SYSTEM (10%)
 
@@ -150,13 +150,13 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
     8.1 Push Notifications (Đã có bảng reminders, cần kết nối Expo Notifications)
         [/] Push Notifications: Đã có bảng reminders, cần tích hợp expo-notifications để đẩy tin nhắn thật lên điện thoại.
     8.2 In-App Center
-        [ ] In-App Center: Cần một màn hình "Thông báo" gom nhóm theo loại: Ưu đãi, Cảnh báo, Tin nhắn.
+        [/] In-App Center: Đã có màn hình "Thông báo" + badge/toast; chưa gom nhóm theo loại.
 
 9. DATA SYNCHRONIZATION & OFFLINE ACCESS (5%)
 
-        [x] Offline caching for saved items, profile: làm với FX Service qua AsyncStorage. Cần áp dụng tương tự cho danh sách Bookmarked.
+    [/] Offline caching for saved items, profile: Hiện mới có caching cho FX/theme; chưa cache favorites/profile theo yêu cầu.
 
-        [/] Auto-sync changes when back online: Cần sử dụng thư viện NetInfo để detect mạng và tự động đẩy các thay đổi (ví dụ: đánh dấu yêu thích khi offline) lên Supabase khi có mạng lại.
+        [ ] Auto-sync changes when back online: Cần sử dụng thư viện NetInfo để detect mạng và tự động đẩy các thay đổi (ví dụ: đánh dấu yêu thích khi offline) lên Supabase khi có mạng lại.
 
         [ ] Limited offline access: Cho phép xem lại thông tin chi tiết các địa danh đã từng "đi qua" (cached) va event mà không cần mạng.
 
@@ -172,7 +172,7 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 
 11.  ADMIN DASHBOARD (New - 5%)
 
-        [/] View: user profiles, events, reviews:
+    [ ] View: user profiles, events, reviews:
 
         Status: Xem trực tiếp qua Supabase Dashboard (Backend). Cần làm một màn hình UI dành riêng cho tài khoản có role: 'admin' để xem danh sách này trên app hoặc web.
 
@@ -190,26 +190,26 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 
 12.  TRAVEL PLANNING (New - 5%)
 
-        [/] Itinerary builder: Add events and places to a day-wise plan:
+    [/] Itinerary builder: Add events and places to a day-wise plan:
 
     Status: Trọng tâm. Đã có SQL itinerary_items. Đang triển khai BottomSheet để chọn ngày và thêm từ trang Chi tiết.
 
-        [ ] Share travel plans:
+        [x] Share travel plans:
 
     Status: Cần tạo mã QR (thư viện react-native-qrcode-svg) chứa Deep Link dẫn đến chuyến đi, hoặc xuất file PDF lịch trình.
 
-        [ x ] Add travel notes or reminders:
+        [x] Add travel notes or reminders:
 
     Status: Đã có cột notes trong Database. Logic nhắc nhở đã có bảng reminders.
 
-        [ ] Suggested route optimization:
+        [x] Suggested route optimization:
 
     Status: Thách thức kỹ thuật. Cần thuật toán sắp xếp các itinerary_items theo khoảng cách địa lý (từ tọa độ đã nạp) để gợi ý thứ tự đi 1 -> 2 -> 3 sao cho quãng đường ngắn nhất.
 
 13. ADVANCED SEARCH & SMART DISCOVERY (5%)
 
     13.1 Voice Search
-        [/] Tìm kiếm bằng giọng nói (Google Speech API): * Status: Cậu có thể tận dụng WhisperX từ dự án Thesis trước đó hoặc dùng Google Speech-to-Text.
+        [ ] Tìm kiếm bằng giọng nói (Google Speech API): * Status: Cậu có thể tận dụng WhisperX từ dự án Thesis trước đó hoặc dùng Google Speech-to-Text.
 
         [ ] Gợi ý kết quả theo thời gian thực: Cần logic stream kết quả tìm kiếm ngay khi tiếng nói được chuyển thành văn bản.
 
@@ -250,4 +250,8 @@ Status: Cần một bảng activities ghi lại các trigger từ Reviews và Bo
         [ ] Gửi ảnh, vị trí: Tích hợp Supabase Storage và GPS (Module 2).
 
         [ ] Pin thông báo quan trọng: Logic gắn cờ cho tin nhắn trong bảng messages.
---Chưa anti replay attack  
+
+
+## Future Enhancements (Cải tiến trong tương lai)
+- [ ] **Profile Onboarding Guard:** Thêm Global Guard lớp thứ 2 để ép buộc user mới đăng ký phải cập nhật đầy đủ thông tin (tên, avatar) trước khi vào trang chủ.
+- [ ] Anti replay attack

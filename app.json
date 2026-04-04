@@ -16,6 +16,7 @@
     },
     "android": {
       "permissions": [
+        "POST_NOTIFICATIONS",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "FOREGROUND_SERVICE",
@@ -39,6 +40,14 @@
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ExploreEase cần truy cập thư viện ảnh để bạn đính kèm ảnh vào đánh giá.",
+          "cameraPermission": "ExploreEase cần truy cập camera để bạn chụp ảnh cho đánh giá."
+        }
+      ],
       [
         "expo-splash-screen",
         {

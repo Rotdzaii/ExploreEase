@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import React, { useEffect, useMemo, useRef } from 'react';
 import {
@@ -16,6 +17,7 @@ export function GlobalToastHost() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { isDark } = useTheme();
+  const { t } = useI18n();
 
   const activeToastId = useNotificationStore((s) => s.activeToastId);
   const notifications = useNotificationStore((s) => s.notifications);
@@ -112,7 +114,7 @@ export function GlobalToastHost() {
           <View style={[styles.accent, { backgroundColor: ExploreEaseColors.primary }]} />
           <View style={styles.content}>
             <Text style={[styles.title, { color: textColor }]} numberOfLines={1}>
-              Thông báo
+              {t('common.notification')}
             </Text>
             <Text style={[styles.message, { color: subTextColor }]} numberOfLines={2}>
               {toast.message}

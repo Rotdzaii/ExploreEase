@@ -9,23 +9,28 @@ import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Animated,
-    type ColorValue,
     Platform,
     SafeAreaView,
     ScrollView,
     StatusBar,
     useWindowDimensions,
-    View
+    View,
+    type ColorValue
 } from 'react-native';
 import { CategoriesCarousel } from '../../components/home/CategoriesCarousel';
 import { FeaturedDestination } from '../../components/home/FeaturedDestination';
 import { Header } from '../../components/home/Header';
 import { PopularDestinations } from '../../components/home/PopularDestinations';
 import { SearchBar } from '../../components/home/SearchBar';
+import { TimeOfDayToggle } from '../../components/home/TimeOfDayToggle';
+import { YouMightAlsoLike, type YouMightAlsoLikeItem } from '../../components/home/YouMightAlsoLike';
 import { ExploreEaseColors } from '../../constants/exploreEaseTheme';
 import { destinationService } from '../../src/services/destinationService';
+import { presentLocalNotificationAsync } from '../../src/services/localNotificationService';
 import { profileService } from '../../src/services/profileService';
+import { recommendationService, resolveTimeOfDayPreference, type PersonalizedRecommendationsResult } from '../../src/services/recommendationService';
 import { supabase } from '../../src/services/supabase';
+import { useRecommendationPreferencesStore } from '../../src/store/useRecommendationPreferencesStore';
 
 type CategoryRow = {
   id: number;
@@ -48,7 +53,10 @@ type NotificationRow = {
   is_read?: boolean | null;
   created_at?: string | null;
   title?: string | null;
+  message?: string | null;
   body?: string | null;
+  type?: string | null;
+  metadata?: Record<string, unknown> | null;
   [key: string]: any;
 };
 
@@ -65,16 +73,20 @@ export default function HomeScreen() {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [pendingRemindersCount, setPendingRemindersCount] = useState(0);
   const [searchText, setSearchText] = useState('');
+  const timeOfDayPreference = useRecommendationPreferencesStore((s) => s.timeOfDayPreference);
+  const setTimeOfDayPreference = useRecommendationPreferencesStore((s) => s.setTimeOfDayPreference);
 
   const searchRequestIdRef = React.useRef(0);
 
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadingDestinations, setLoadingDestinations] = useState(true);
-  const isLoading = loadingProfile || loadingDestinations;
+  const [loadingPersonalized, setLoadingPersonalized] = useState(true);
+  const isLoading = loadingProfile || loadingDestinations || loadingPersonalized;
 
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [featured, setFeatured] = useState<DestinationRow | null>(null);
   const [popular, setPopular] = useState<DestinationRow[]>([]);
+  const [personalized, setPersonalized] = useState<PersonalizedRecommendationsResult | null>(null);
 
   const categoryItems = useMemo(
     () => categories.map((c) => ({ id: String(c.id), label: c.name })),
@@ -82,6 +94,11 @@ export default function HomeScreen() {
   );
 
   const pulse = React.useRef(new Animated.Value(0)).current;
+
+  const effectiveTimeOfDay = useMemo(
+    () => resolveTimeOfDayPreference(timeOfDayPreference),
+    [timeOfDayPreference]
+  );
 
   const onPressFilters = useCallback(() => {
     // placeholder
@@ -95,6 +112,15 @@ export default function HomeScreen() {
       const amount = parseMoneyToNumber(value);
       if (amount === null) return '';
       return formatPricePerPerson(amount);
+    },
+    [formatPricePerPerson]
+  );
+
+  const toSuggestionPrice = useCallback(
+    (value: number | null) => {
+      if (value === null) return '—';
+      if (value <= 0) return 'FREE';
+      return formatPricePerPerson(value);
     },
     [formatPricePerPerson]
   );
@@ -134,6 +160,25 @@ export default function HomeScreen() {
       setLoadingDestinations(false);
     }
   }, []);
+
+  const fetchPersonalizedRecommendations = useCallback(async () => {
+    setLoadingPersonalized(true);
+    try {
+      const result = await recommendationService.getPersonalizedRecommendationsForCurrentUser({
+        limitDestinations: 8,
+        limitEvents: 6,
+        timeOfDay: effectiveTimeOfDay,
+        respectTimeOfDayWindow: true,
+      });
+
+      setPersonalized(result);
+    } catch (err: any) {
+      console.warn('fetchPersonalizedRecommendations failed:', err?.message ?? err);
+      setPersonalized(null);
+    } finally {
+      setLoadingPersonalized(false);
+    }
+  }, [effectiveTimeOfDay]);
 
   const loadData = useCallback(async () => {
     await fetchDestinations();
@@ -191,34 +236,30 @@ export default function HomeScreen() {
     }
   }, []);
 
-  const markAllNotificationsRead = useCallback(async (userId: string) => {
-    const prev = notifications;
-    setNotifications([]);
-
-    try {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ is_read: true })
-        .eq('user_id', userId)
-        .eq('is_read', false);
-
-      if (error) {
-        console.warn('markAllNotificationsRead error:', error.message);
-        setNotifications(prev);
-      }
-    } catch (err: any) {
-      console.warn('markAllNotificationsRead failed:', err?.message ?? err);
-      setNotifications(prev);
-    }
-  }, [notifications]);
-
-  const onPressBell = useCallback(async () => {
+  const onPressBell = useCallback(() => {
     router.push('/notifications' as any);
+  }, []);
 
-    const { data } = await supabase.auth.getUser();
-    const userId = data.user?.id;
-    if (userId) await markAllNotificationsRead(userId);
-  }, [markAllNotificationsRead]);
+  const onPressPersonalizedItem = useCallback((item: YouMightAlsoLikeItem) => {
+    if (item.kind === 'event') {
+      router.push(`/event/${item.id}` as any);
+      return;
+    }
+
+    router.push(
+      {
+        pathname: '/destination/[id]',
+        params: {
+          id: item.id,
+          name: item.title,
+          location: item.location,
+          price: item.displayPrice,
+          rating: typeof item.rating === 'number' ? item.rating.toFixed(1) : '',
+          imageUrl: item.imageUrl ?? '',
+        },
+      } as any
+    );
+  }, []);
 
   const refreshPendingReminders = useCallback(async () => {
     try {
@@ -245,6 +286,10 @@ export default function HomeScreen() {
       void mounted;
     };
   }, [fetchDestinations, fetchProfile]);
+
+  useEffect(() => {
+    void fetchPersonalizedRecommendations();
+  }, [fetchPersonalizedRecommendations]);
 
   useEffect(() => {
     let isActive = true;
@@ -282,6 +327,55 @@ export default function HomeScreen() {
               if (next?.id !== undefined && prev.some((n) => n.id === next.id)) return prev;
               return [next, ...prev];
             });
+
+            void presentLocalNotificationAsync({
+              title: next?.title,
+              message: next?.message ?? next?.body,
+              data: {
+                notificationId: String(next?.id ?? ''),
+                type: next?.type ?? 'system',
+              },
+            });
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            if (!isActive) return;
+
+            const next = payload.new as NotificationRow;
+            if (!next?.id) return;
+
+            setNotifications((prev) => {
+              if (next.is_read) {
+                return prev.filter((item) => item.id !== next.id);
+              }
+
+              const filtered = prev.filter((item) => item.id !== next.id);
+              return [next, ...filtered];
+            });
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            if (!isActive) return;
+            const oldRow = payload.old as NotificationRow;
+            if (!oldRow?.id) return;
+
+            setNotifications((prev) => prev.filter((item) => item.id !== oldRow.id));
           }
         )
         .subscribe();
@@ -393,6 +487,17 @@ export default function HomeScreen() {
     [popular, toDisplayPrice]
   );
 
+  const personalizedItems = useMemo<YouMightAlsoLikeItem[]>(
+    () =>
+      (personalized?.combined ?? []).map((item) => ({
+        ...item,
+        displayPrice: toSuggestionPrice(item.priceValue),
+      })),
+    [personalized, toSuggestionPrice]
+  );
+
+  const activeTimeOfDay = personalized?.timeOfDay ?? effectiveTimeOfDay;
+
   return (
     <LinearGradient colors={gradientColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.mainContainer}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
@@ -457,6 +562,19 @@ export default function HomeScreen() {
                 }}
               />
             ) : null}
+
+            <TimeOfDayToggle
+              value={timeOfDayPreference}
+              onChange={setTimeOfDayPreference}
+            />
+
+            <YouMightAlsoLike
+              items={personalizedItems}
+              loading={loadingPersonalized}
+              timeOfDay={activeTimeOfDay}
+              travelStyle={personalized?.preferences.travelStyle ?? null}
+              onPressItem={onPressPersonalizedItem}
+            />
 
             <PopularDestinations
               styles={styles}

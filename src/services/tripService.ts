@@ -64,4 +64,18 @@ export const tripService = {
     if (error) throw error;
     return data as TripRow;
   },
+
+  async getTripByIdForCurrentUser(tripId: string): Promise<TripRow | null> {
+    const userId = await ensureAuthenticatedUserId();
+
+    const { data, error } = await supabase
+      .from('trips')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('id', tripId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return (data ?? null) as TripRow | null;
+  },
 };

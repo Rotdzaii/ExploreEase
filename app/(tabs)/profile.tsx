@@ -1,25 +1,41 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
+import { adminService } from '@/src/services/adminService';
 import { profileService } from '@/src/services/profileService';
 import { supabase } from '@/src/services/supabase';
+import { useLanguageStore } from '@/src/store/useLanguageStore';
+import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useMemo } from 'react';
-import { Image, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Image, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 export default function ProfileScreen() {
   const { isDark, toggleColorScheme } = useTheme();
+  const addNotification = useNotificationStore((s) => s.addNotification);
+  const { language, t } = useI18n();
+  const setLanguage = useLanguageStore((s) => s.setLanguage);
 
   const [profileName, setProfileName] = React.useState<string>('Nguyên');
   const [nationality, setNationality] = React.useState<string>('Việt Nam');
   const [nationalityCode, setNationalityCode] = React.useState<string>('VN');
+  const [isAdmin, setIsAdmin] = React.useState(false);
+  const [languageModalVisible, setLanguageModalVisible] = React.useState(false);
 
   React.useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const profile = await profileService.getCurrentProfile();
-        if (!alive || !profile) return;
+        const [profile, hasAdminRole] = await Promise.all([
+          profileService.getCurrentProfile(),
+          adminService.isCurrentUserAdmin().catch(() => false),
+        ]);
+
+        if (!alive) return;
+
+        setIsAdmin(hasAdminRole);
+        if (!profile) return;
 
         const normalizedName = typeof profile.full_name === 'string' && profile.full_name.trim()
           ? profile.full_name.trim()
@@ -38,6 +54,7 @@ export default function ProfileScreen() {
         setNationality(normalizedNationality);
         setNationalityCode(normalizedNationalityCode);
       } catch {
+        setIsAdmin(false);
         // keep fallbacks
       }
     };
@@ -190,7 +207,7 @@ export default function ProfileScreen() {
 
             {/* Language */}
             <Pressable
-              onPress={() => {}}
+              onPress={() => setLanguageModalVisible(true)}
               style={({ pressed }) => [styles.settingRow, { borderColor: colors.border, opacity: pressed ? 0.85 : 1 }]}
               accessibilityRole="button"
               accessibilityLabel="Ngôn ngữ"
@@ -200,8 +217,10 @@ export default function ProfileScreen() {
                   <Feather name="globe" size={18} color={colors.title} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.rowTitle, { color: colors.rowText }]}>Ngôn ngữ</Text>
-                  <Text style={[styles.rowDesc, { color: colors.subtitle }]}>Tiếng Việt</Text>
+                  <Text style={[styles.rowTitle, { color: colors.rowText }]}>{t('language.selectTitle')}</Text>
+                  <Text style={[styles.rowDesc, { color: colors.subtitle }]}>
+                    {language === 'en' ? t('language.en') : t('language.vi')}
+                  </Text>
                 </View>
               </View>
 
@@ -228,6 +247,27 @@ export default function ProfileScreen() {
               <Feather name="chevron-right" size={20} color={colors.subtitle} />
             </Pressable>
 
+            {isAdmin ? (
+              <Pressable
+                onPress={() => router.push('/admin/dashboard')}
+                style={({ pressed }) => [styles.settingRow, { borderColor: colors.border, opacity: pressed ? 0.85 : 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Admin Dashboard"
+              >
+                <View style={styles.rowLeft}>
+                  <View style={[styles.iconWrap, { borderColor: colors.border, backgroundColor: 'transparent' }]}>
+                    <Feather name="shield" size={18} color={colors.title} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.rowTitle, { color: colors.rowText }]}>Admin Dashboard</Text>
+                    <Text style={[styles.rowDesc, { color: colors.subtitle }]}>Moderate events and review reports</Text>
+                  </View>
+                </View>
+
+                <Feather name="chevron-right" size={20} color={colors.subtitle} />
+              </Pressable>
+            ) : null}
+
             {/* Logout */}
             <Pressable
               onPress={handleLogout}
@@ -248,6 +288,88 @@ export default function ProfileScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <Modal
+        visible={languageModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLanguageModalVisible(false)}
+      >
+        <Pressable
+          onPress={() => setLanguageModalVisible(false)}
+          style={styles.modalBackdrop}
+        >
+          <Pressable
+            onPress={() => void 0}
+            style={[
+              styles.languageModalCard,
+              {
+                backgroundColor: colors.cardBg,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.languageModalTitle, { color: colors.title }]}>{t('language.selectTitle')}</Text>
+            <Text style={[styles.languageModalSubtitle, { color: colors.subtitle }]}>{t('language.selectSubtitle')}</Text>
+
+            {([
+              { code: 'vi' as const, label: t('language.vi') },
+              { code: 'en' as const, label: t('language.en') },
+            ]).map((item) => {
+              const selected = language === item.code;
+              return (
+                <Pressable
+                  key={item.code}
+                  onPress={() => {
+                    setLanguage(item.code);
+                    setLanguageModalVisible(false);
+                    addNotification({
+                      message: t('language.changeSuccess'),
+                      type: 'success',
+                      durationMs: 2200,
+                    });
+                  }}
+                  style={({ pressed }) => [
+                    styles.languageOption,
+                    {
+                      borderColor: selected ? ExploreEaseColors.primary : colors.border,
+                      backgroundColor: selected
+                        ? 'rgba(34,211,238,0.14)'
+                        : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)'),
+                    },
+                    pressed ? { opacity: 0.84 } : null,
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: selected ? ExploreEaseColors.primary : colors.rowText,
+                      fontSize: 14,
+                      fontWeight: '800',
+                    }}
+                  >
+                    {item.label}
+                  </Text>
+                  {selected ? <Feather name="check" size={16} color={ExploreEaseColors.primary} /> : null}
+                </Pressable>
+              );
+            })}
+
+            <Pressable
+              onPress={() => setLanguageModalVisible(false)}
+              style={({ pressed }) => [
+                styles.languageCloseBtn,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#ffffff',
+                },
+                pressed ? { opacity: 0.84 } : null,
+              ]}
+            >
+              <Text style={{ color: colors.rowText, fontWeight: '800', fontSize: 13 }}>{t('common.cancel')}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -345,4 +467,47 @@ const styles = StyleSheet.create({
   },
   rowTitle: { fontSize: 15, fontWeight: '800' },
   rowDesc: { marginTop: 2, fontSize: 12, fontWeight: '600' },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 18,
+  },
+  languageModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    gap: 10,
+  },
+  languageModalTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  languageModalSubtitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  languageOption: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  languageCloseBtn: {
+    marginTop: 4,
+    minHeight: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

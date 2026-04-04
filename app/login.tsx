@@ -283,6 +283,9 @@ export default function LoginScreen() {
                       <Text style={[styles.welcomeTitle, { color: isDark ? 'white' : '#0f172a' }]}>Welcome Back</Text>
                       <AuthInput label="Email" icon="email-outline" isDark={isDark} placeholder="you@example.com" value={email} onChangeText={setEmail} error={errors.email} />
                       <AuthInput label="Password" icon="lock-outline" isDark={isDark} secure={!showPassword} placeholder="••••••••" value={password} onChangeText={setPassword} isPassword onTogglePassword={() => setShowPassword(!showPassword)} showPassword={showPassword} error={errors.password} />
+                      <TouchableOpacity onPress={() => router.push('/forgot-password')} style={{ alignSelf: 'flex-end', marginTop: 2 }}>
+                        <Text style={{ color: '#3b82f6', fontWeight: '700', fontSize: 12 }}>Forgot Password?</Text>
+                      </TouchableOpacity>
                       <TouchableOpacity onPress={handleAuthAction} disabled={loading} style={styles.signInButton}>
                         {loading ? <ActivityIndicator color="white" /> : <Text style={styles.signInText}>Sign In</Text>}
                       </TouchableOpacity>

@@ -1,37 +1,43 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetBackdrop } from '@gorhom/bottom-sheet';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  ImageBackground,
-  Modal,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    ImageBackground,
+    Modal,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    useWindowDimensions,
+    View,
 } from 'react-native';
 
+import { TimeOfDayToggle } from '@/components/home/TimeOfDayToggle';
+import { YouMightAlsoLike, type YouMightAlsoLikeItem } from '@/components/home/YouMightAlsoLike';
+import { ModerationModal, RatingDistribution, ReviewCard, ReviewForm } from '@/components/reviews';
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useLocation } from '@/hooks/useLocation';
 import { useCurrency } from '@/src/context/currency';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { calculateAverageRating, destinationService, type ReviewRow } from '@/src/services/destinationService';
 import { favoritesService } from '@/src/services/favoritesService';
 import { itineraryService } from '@/src/services/itineraryService';
+import { recommendationService, resolveTimeOfDayPreference, type PersonalizedRecommendationsResult } from '@/src/services/recommendationService';
+import { reviewService } from '@/src/services/reviewService';
 import { supabase } from '@/src/services/supabase';
 import { tripService, type TripRow } from '@/src/services/tripService';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
+import { useRecommendationPreferencesStore } from '@/src/store/useRecommendationPreferencesStore';
 import { parseMoneyToNumber } from '@/utils/format';
 import { formatDistance, getHaversineDistance } from '@/utils/location';
 import { BlurView } from 'expo-blur';
@@ -45,6 +51,23 @@ type DetailParams = {
   rating?: string;
   imageUrl?: string;
 };
+
+type ReviewSortOption = 'newest' | 'highest' | 'lowest' | 'most-helpful';
+
+const MAX_REVIEW_PHOTOS = 4;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -76,6 +99,41 @@ const toAmenityList = (value: unknown) => {
   if (Array.isArray(value)) return value.map((v) => String(v)).map((v) => v.trim()).filter(Boolean);
   if (typeof value === 'string') return value.split(',').map((v) => v.trim()).filter(Boolean);
   return [] as string[];
+};
+
+const toReviewImageUrls = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const toDestinationCategory = (row: any): string | null => {
+  if (!row) return null;
+
+  const relation = row.categories;
+  if (Array.isArray(relation)) {
+    const first = relation[0];
+    if (first && typeof first.name === 'string' && first.name.trim()) return first.name.trim();
+  }
+
+  if (relation && typeof relation === 'object') {
+    const name = (relation as { name?: unknown }).name;
+    if (typeof name === 'string' && name.trim()) return name.trim();
+  }
+
+  if (typeof row.category === 'string' && row.category.trim()) return row.category.trim();
+  return null;
 };
 
 const parseDateOnly = (value: string | null | undefined): Date | null => {
@@ -118,7 +176,10 @@ const openGoogleMaps = async (coords: { latitude: number; longitude: number }) =
 export default function DestinationDetailScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const { isDark } = useTheme();
+  const { t } = useI18n();
   const { formatPricePerPerson } = useCurrency();
+  const timeOfDayPreference = useRecommendationPreferencesStore((s) => s.timeOfDayPreference);
+  const setTimeOfDayPreference = useRecommendationPreferencesStore((s) => s.setTimeOfDayPreference);
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<DetailParams>();
 
@@ -131,12 +192,6 @@ export default function DestinationDetailScreen() {
   const price = params.price ? String(params.price) : '';
 
   const destinationId = params.id ? String(params.id) : '';
-
-  // Injected Logs: params snapshot
-  useEffect(() => {
-    console.log('[AddToPlan] destination_id:', destinationId, 'name:', name, 'params:', params);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destinationId]);
 
   const { location, errorMsg: locationErrorMsg, isLoading: isLoadingLocation } = useLocation();
   const [destinationCoords, setDestinationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -165,11 +220,24 @@ export default function DestinationDetailScreen() {
   const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
   const [reviewsTotalCount, setReviewsTotalCount] = useState<number | null>(null);
   const [hasMoreReviews, setHasMoreReviews] = useState(true);
+  const [reviewSort, setReviewSort] = useState<ReviewSortOption>('newest');
+  const [helpfulPendingId, setHelpfulPendingId] = useState<string | null>(null);
+  const [replyDraftByReview, setReplyDraftByReview] = useState<Record<string, string>>({});
+  const [submittingReplyId, setSubmittingReplyId] = useState<string | null>(null);
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportReviewId, setReportReviewId] = useState<string | null>(null);
+  const [reportReason, setReportReason] = useState('');
+  const [submittingReport, setSubmittingReport] = useState(false);
 
   const [isWritingReview, setIsWritingReview] = useState(false);
   const [draftRating, setDraftRating] = useState<number>(5);
   const [draftComment, setDraftComment] = useState('');
+  const [draftPhotoAssets, setDraftPhotoAssets] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [uploadingDraftPhotos, setUploadingDraftPhotos] = useState(false);
   const [submittingReview, setSubmittingReview] = useState(false);
+
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const addSheetRef = useRef<BottomSheet>(null);
   const [isAddToTripOpen, setIsAddToTripOpen] = useState(false);
@@ -183,10 +251,57 @@ export default function DestinationDetailScreen() {
   const [isNoTripsModalOpen, setIsNoTripsModalOpen] = useState(false);
   const [creatingTripAndAdding, setCreatingTripAndAdding] = useState(false);
   const [isTripPickerModalOpen, setIsTripPickerModalOpen] = useState(false);
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false);
+  const [recommendations, setRecommendations] = useState<PersonalizedRecommendationsResult | null>(null);
 
   const addNotification = useNotificationStore((s) => s.addNotification);
+  const effectiveRecommendationTimeOfDay = useMemo(
+    () => resolveTimeOfDayPreference(timeOfDayPreference),
+    [timeOfDayPreference]
+  );
 
   const REVIEWS_PAGE_SIZE = 10;
+
+  const promptLogin = useCallback((message: string) => {
+    addNotification({
+      message,
+      type: 'warning',
+      durationMs: 3000,
+    });
+
+    Alert.alert(t('common.loginRequiredTitle'), message, [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.login'), onPress: () => router.push('/login' as any) },
+    ]);
+  }, [addNotification, t]);
+
+  const fetchAuthContext = useCallback(async () => {
+    try {
+      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+
+      const userId = userRes.user?.id ?? null;
+      setCurrentUserId(userId);
+
+      if (!userId) {
+        setIsAdmin(false);
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const role = String((profile as any)?.role ?? '').trim().toLowerCase();
+      setIsAdmin(role === 'admin');
+    } catch (error) {
+      console.warn('fetchAuthContext failed:', error);
+      setCurrentUserId(null);
+      setIsAdmin(false);
+    }
+  }, []);
 
   const refreshReviews = useCallback(async () => {
     if (!destinationId) return;
@@ -255,14 +370,9 @@ export default function DestinationDetailScreen() {
     setLoadingTrips(true);
     try {
       const rows = await tripService.getTripsForCurrentUser();
-
-      // Injected Logs: data flow
-      console.log('[AddToPlan] Trips fetched (rows):', rows);
-
       setTrips(rows ?? []);
       return (rows ?? []) as TripRow[];
     } catch (err: any) {
-      console.log('[AddToPlan] Trips fetched (rows):', null, 'Error:', err);
       console.warn('loadTrips failed:', err?.message ?? err);
       setTrips([]);
       return [];
@@ -273,10 +383,6 @@ export default function DestinationDetailScreen() {
 
   const ensureLoggedIn = useCallback(async (): Promise<boolean> => {
     try {
-      // Injected Logs: auth
-      const { data: sessionData } = await supabase.auth.getSession();
-      console.log('Current User ID:', sessionData?.session?.user?.id);
-
       const { data, error } = await supabase.auth.getUser();
       if (error) throw error;
       if (data.user?.id) return true;
@@ -292,16 +398,12 @@ export default function DestinationDetailScreen() {
   }, []);
 
   const openAddToTrip = useCallback(() => {
-    // Injected Logs: UI state
-    console.log('[AddToPlan] openAddToTrip called. isAddToTripOpen -> true');
     setSelectedTripRow(null);
     setSelectedTripDay(1);
     setIsAddToTripOpen(true);
   }, []);
 
   const closeAddToTrip = useCallback(() => {
-    // Injected Logs: UI state
-    console.log('[AddToPlan] closeAddToTrip called. isAddToTripOpen -> false');
     setIsAddToTripOpen(false);
   }, []);
 
@@ -311,11 +413,6 @@ export default function DestinationDetailScreen() {
     setSelectedTripRow(null);
     setSelectedTripDay(1);
   }, []);
-
-  // Injected Logs: UI state (source of truth)
-  useEffect(() => {
-    console.log('[AddToPlan] BottomSheet visible:', isAddToTripOpen);
-  }, [isAddToTripOpen]);
 
   const selectedTripDaysCount = useMemo(() => {
     if (!selectedTripRow) return 1;
@@ -327,21 +424,12 @@ export default function DestinationDetailScreen() {
   const createTrip = useCallback(async () => {
     if (creatingTrip) return;
 
-    // Injected Logs: create trip action
-    console.log('[AddToPlan] createTrip pressed', { name, destination_id: destinationId });
-
     const ok = await ensureLoggedIn();
     if (!ok) return;
 
     setCreatingTrip(true);
     try {
       const todayIso = new Date().toISOString().slice(0, 10);
-      console.log('[AddToPlan] createTrip payload', {
-        name: `Chuyến đi tới ${name}`,
-        destination: name,
-        start_date: todayIso,
-        end_date: todayIso,
-      });
       const newTrip = await tripService.createTripForCurrentUser({
         name: `Chuyến đi tới ${name}`,
         destination: name,
@@ -350,19 +438,16 @@ export default function DestinationDetailScreen() {
         end_date: todayIso,
       });
 
-      console.log('[AddToPlan] createTrip success:', newTrip);
-
       setTrips((prev) => [newTrip, ...(prev ?? [])]);
       setSelectedTripRow(newTrip);
       setSelectedTripDay(1);
     } catch (err: any) {
-      console.log('[AddToPlan] createTrip error:', err);
       console.warn('createTrip failed:', err?.message ?? err);
       Alert.alert('Không thể tạo chuyến đi', 'Vui lòng thử lại sau.');
     } finally {
       setCreatingTrip(false);
     }
-  }, [creatingTrip, destinationId, ensureLoggedIn, imageUrl, name]);
+  }, [creatingTrip, ensureLoggedIn, imageUrl, name]);
 
   const createTripAndAutoAdd = useCallback(async () => {
     if (creatingTripAndAdding) return;
@@ -397,7 +482,7 @@ export default function DestinationDetailScreen() {
         end_date: todayIso,
       });
 
-      await itineraryService.addItemToTrip({
+      await itineraryService.addDestinationToTripDay({
         tripId: newTrip.id,
         day: 1,
         destination_id: destinationId,
@@ -426,15 +511,6 @@ export default function DestinationDetailScreen() {
   }, [addNotification, creatingTripAndAdding, destinationCoords, destinationId, destinationRow, ensureLoggedIn, imageUrl, name]);
 
   const addToTrip = useCallback(async () => {
-    // Injected Logs: params + state at action time
-    console.log('[AddToPlan] addToTrip pressed', {
-      destination_id: destinationId,
-      destinationName: name,
-      selectedTripId: selectedTripRow?.id,
-      selectedTripDay,
-      savingToTrip,
-    });
-
     if (!selectedTripRow || savingToTrip) return;
     if (!destinationId) {
       Alert.alert('Không thể thêm vào kế hoạch', 'Thiếu destination_id.');
@@ -458,7 +534,7 @@ export default function DestinationDetailScreen() {
 
     setSavingToTrip(true);
     try {
-      await itineraryService.addItemToTrip({
+      await itineraryService.addDestinationToTripDay({
         tripId: selectedTripRow.id,
         day: selectedTripDay,
         destination_id: destinationId,
@@ -483,9 +559,6 @@ export default function DestinationDetailScreen() {
   }, [addNotification, closeTripPicker, destinationCoords, destinationId, destinationRow, ensureLoggedIn, imageUrl, name, savingToTrip, selectedTripDay, selectedTripRow]);
 
   const handleAddToPlan = useCallback(() => {
-    // Instant check (debug): if you don't see this, onPress is not wired.
-    console.log('Button Pressed!');
-
     void (async () => {
       const ok = await ensureLoggedIn();
       if (!ok) return;
@@ -534,6 +607,17 @@ export default function DestinationDetailScreen() {
   useEffect(() => {
     void fetchDestinationCoords();
   }, [fetchDestinationCoords]);
+
+  useEffect(() => {
+    void fetchAuthContext();
+    const { data } = supabase.auth.onAuthStateChange(() => {
+      void fetchAuthContext();
+    });
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
+  }, [fetchAuthContext]);
 
   useEffect(() => {
     if (!destinationId) return;
@@ -640,34 +724,442 @@ export default function DestinationDetailScreen() {
     return formatDistance(meters);
   }, [destinationCoords, location]);
 
-  const onPressWriteReview = useCallback(() => {
-    setIsWritingReview((prev) => !prev);
+  const canReplyToReviews = useMemo(() => {
+    if (isAdmin) return true;
+    if (!currentUserId) return false;
+
+    const ownerCandidates = [
+      (destinationRow as any)?.creator_id,
+      (destinationRow as any)?.owner_id,
+      (destinationRow as any)?.user_id,
+      (destinationRow as any)?.created_by,
+    ];
+
+    return ownerCandidates.some((candidate) => {
+      if (!candidate) return false;
+      return String(candidate) === currentUserId;
+    });
+  }, [currentUserId, destinationRow, isAdmin]);
+
+  const ratingDistribution = useMemo(() => {
+    const bucket: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const review of reviews) {
+      const rounded = Math.max(1, Math.min(5, Math.round(Number(review.rating) || 0)));
+      bucket[rounded] += 1;
+    }
+
+    const total = Math.max(1, reviews.length);
+    return [5, 4, 3, 2, 1].map((star) => ({
+      star,
+      count: bucket[star],
+      percent: (bucket[star] / total) * 100,
+    }));
+  }, [reviews]);
+
+  const sortedReviews = useMemo(() => {
+    const rows = [...reviews];
+    const byCreatedAtDesc = (a: ReviewRow, b: ReviewRow) => {
+      const aTs = new Date(a.created_at ?? 0).getTime();
+      const bTs = new Date(b.created_at ?? 0).getTime();
+      return bTs - aTs;
+    };
+
+    if (reviewSort === 'highest') {
+      return rows.sort((a, b) => Number(b.rating) - Number(a.rating) || byCreatedAtDesc(a, b));
+    }
+
+    if (reviewSort === 'lowest') {
+      return rows.sort((a, b) => Number(a.rating) - Number(b.rating) || byCreatedAtDesc(a, b));
+    }
+
+    if (reviewSort === 'most-helpful') {
+      return rows.sort((a, b) => {
+        const aHelpful = typeof a.helpful_count === 'number' ? a.helpful_count : 0;
+        const bHelpful = typeof b.helpful_count === 'number' ? b.helpful_count : 0;
+        if (bHelpful !== aHelpful) return bHelpful - aHelpful;
+        return byCreatedAtDesc(a, b);
+      });
+    }
+
+    return rows.sort(byCreatedAtDesc);
+  }, [reviewSort, reviews]);
+
+  const pickReviewPhotos = useCallback(async () => {
+    const remaining = MAX_REVIEW_PHOTOS - draftPhotoAssets.length;
+    if (remaining <= 0) {
+      addNotification({
+        message: t('review.validation.maxPhotos', { max: MAX_REVIEW_PHOTOS }),
+        type: 'warning',
+        durationMs: 3200,
+      });
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      addNotification({
+        message: t('review.validation.photoPermission'),
+        type: 'error',
+        durationMs: 3600,
+      });
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
+      quality: 0.8,
+    });
+
+    if (result.canceled) return;
+
+    setDraftPhotoAssets((prev) => {
+      const seen = new Set(prev.map((asset) => asset.uri));
+      const merged = [...prev];
+      for (const asset of result.assets ?? []) {
+        if (!asset.uri || seen.has(asset.uri)) continue;
+        merged.push(asset);
+        seen.add(asset.uri);
+        if (merged.length >= MAX_REVIEW_PHOTOS) break;
+      }
+      return merged;
+    });
+  }, [addNotification, draftPhotoAssets.length, t]);
+
+  const removeDraftPhoto = useCallback((assetUri: string) => {
+    setDraftPhotoAssets((prev) => prev.filter((asset) => asset.uri !== assetUri));
   }, []);
 
+  const onPressWriteReview = useCallback(() => {
+    setIsWritingReview((prev) => {
+      const next = !prev;
+      if (!next) {
+        setDraftPhotoAssets([]);
+      }
+      return next;
+    });
+  }, []);
+
+  const onToggleHelpfulReview = useCallback(async (review: ReviewRow) => {
+    if (!currentUserId) {
+      promptLogin(t('review.auth.helpfulRequired'));
+      return;
+    }
+
+    const reviewId = String(review.id);
+    if (helpfulPendingId === reviewId) return;
+
+    const wasHelpful = !!review.viewer_has_helpful_vote;
+    const currentCount = typeof review.helpful_count === 'number' ? review.helpful_count : 0;
+    const optimisticCount = Math.max(0, currentCount + (wasHelpful ? -1 : 1));
+
+    setHelpfulPendingId(reviewId);
+    setReviews((prev) =>
+      prev.map((row) =>
+        String(row.id) === reviewId
+          ? {
+              ...row,
+              viewer_has_helpful_vote: !wasHelpful,
+              helpful_count: optimisticCount,
+            }
+          : row
+      )
+    );
+
+    try {
+      const result = await reviewService.toggleHelpful(reviewId);
+      setReviews((prev) =>
+        prev.map((row) =>
+          String(row.id) === reviewId
+            ? {
+                ...row,
+                viewer_has_helpful_vote: result.isHelpful,
+                helpful_count: result.helpfulCount,
+              }
+            : row
+        )
+      );
+    } catch (error) {
+      console.warn('toggleHelpful failed:', error);
+      setReviews((prev) =>
+        prev.map((row) =>
+          String(row.id) === reviewId
+            ? {
+                ...row,
+                viewer_has_helpful_vote: wasHelpful,
+                helpful_count: currentCount,
+              }
+            : row
+        )
+      );
+      addNotification({
+        message: t('review.error.updateHelpful'),
+        type: 'error',
+        durationMs: 3200,
+      });
+    } finally {
+      setHelpfulPendingId(null);
+    }
+  }, [addNotification, currentUserId, helpfulPendingId, promptLogin, t]);
+
+  const openReportModal = useCallback((reviewId: string) => {
+    setReportReviewId(reviewId);
+    setReportReason('');
+    setReportModalVisible(true);
+  }, []);
+
+  const submitReviewReport = useCallback(async () => {
+    if (!reportReviewId) return;
+
+    if (!currentUserId) {
+      setReportModalVisible(false);
+      promptLogin(t('review.auth.reportRequired'));
+      return;
+    }
+
+    const reason = reportReason.trim();
+    if (!reason) {
+      addNotification({
+        message: t('review.validation.reportReasonRequired'),
+        type: 'warning',
+        durationMs: 3200,
+      });
+      return;
+    }
+
+    setSubmittingReport(true);
+    try {
+      await reviewService.reportReview({
+        reviewId: reportReviewId,
+        reason,
+      });
+
+      addNotification({
+        message: t('review.success.reportDestination'),
+        type: 'success',
+        durationMs: 2600,
+      });
+      setReportModalVisible(false);
+      setReportReason('');
+      setReportReviewId(null);
+    } catch (error: any) {
+      console.warn('submitReviewReport failed:', error);
+      const reason = String(error?.message ?? '').trim() || t('review.error.genericTryAgain');
+      addNotification({
+        message: t('review.error.reportFailed', { reason }),
+        type: 'error',
+        durationMs: 3600,
+      });
+    } finally {
+      setSubmittingReport(false);
+    }
+  }, [addNotification, currentUserId, promptLogin, reportReason, reportReviewId, t]);
+
+  const submitReplyToReview = useCallback(async (reviewId: string) => {
+    if (!canReplyToReviews) {
+      addNotification({
+        message: t('review.error.replyNoPermission'),
+        type: 'warning',
+        durationMs: 3200,
+      });
+      return;
+    }
+
+    if (!currentUserId) {
+      promptLogin(t('review.auth.replyRequired'));
+      return;
+    }
+
+    const replyText = (replyDraftByReview[reviewId] ?? '').trim();
+    if (!replyText) {
+      addNotification({
+        message: t('review.validation.replyRequired'),
+        type: 'warning',
+        durationMs: 3200,
+      });
+      return;
+    }
+
+    setSubmittingReplyId(reviewId);
+    try {
+      const result = await reviewService.replyToReview({
+        reviewId,
+        replyText,
+      });
+
+      setReviews((prev) =>
+        prev.map((row) =>
+          String(row.id) === reviewId
+            ? {
+                ...row,
+                reply_text: result.replyText,
+                replied_at: result.repliedAt,
+                replied_by: result.repliedBy,
+              }
+            : row
+        )
+      );
+
+      setReplyDraftByReview((prev) => ({
+        ...prev,
+        [reviewId]: '',
+      }));
+
+      addNotification({
+        message: t('review.success.replyDestination'),
+        type: 'success',
+        durationMs: 2600,
+      });
+    } catch (error: any) {
+      console.warn('submitReplyToReview failed:', error);
+      const reason = String(error?.message ?? '').trim() || t('review.error.genericTryAgain');
+      addNotification({
+        message: t('review.error.replyFailed', { reason }),
+        type: 'error',
+        durationMs: 3600,
+      });
+    } finally {
+      setSubmittingReplyId(null);
+    }
+  }, [addNotification, canReplyToReviews, currentUserId, promptLogin, replyDraftByReview, t]);
+
   const onSubmitReview = useCallback(async () => {
-    if (!destinationId) return;
+    if (!destinationId) {
+      console.error('[ReviewSubmit][Destination] missing destination_id');
+      addNotification({
+        message: t('review.validation.missingDestination'),
+        type: 'error',
+        durationMs: 3800,
+      });
+      return;
+    }
+
+    if (!currentUserId) {
+      console.error('[ReviewSubmit][Destination] missing authenticated user session');
+      promptLogin(t('review.validation.loginRequired'));
+      return;
+    }
 
     const rating = Number(draftRating);
-    if (!Number.isFinite(rating) || rating < 1 || rating > 5) return;
+    if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+      console.error('[ReviewSubmit][Destination] invalid rating', { rating: draftRating });
+      addNotification({
+        message: t('review.validation.invalidRating'),
+        type: 'warning',
+        durationMs: 3200,
+      });
+      return;
+    }
 
     setSubmittingReview(true);
     try {
-      await destinationService.submitReview({
-        destination_id: destinationId,
-        rating,
-        comment: draftComment.trim() ? draftComment.trim() : null,
-      });
+      const uploadedPhotoUrls: string[] = [];
+      if (draftPhotoAssets.length > 0) {
+        setUploadingDraftPhotos(true);
+        try {
+          for (const asset of draftPhotoAssets.slice(0, MAX_REVIEW_PHOTOS)) {
+            if (!asset.uri) continue;
+
+            const response = await withTimeout(
+              fetch(asset.uri),
+              15000,
+              t('review.error.uploadTimeout')
+            );
+
+            if (!response.ok) {
+              throw new Error(`${t('review.error.uploadFailed')} (HTTP ${response.status})`);
+            }
+
+            const blob = await withTimeout(
+              response.blob(),
+              10000,
+              t('review.error.uploadTimeout')
+            );
+
+            const uploadResult = await withTimeout(
+              reviewService.uploadReviewImage({
+                file: blob,
+                fileName: asset.fileName ?? `review-${Date.now()}.jpg`,
+                contentType: asset.mimeType ?? 'image/jpeg',
+              }),
+              20000,
+              t('review.error.uploadTimeout')
+            );
+
+            if (!uploadResult?.publicUrl) {
+              throw new Error(t('review.error.uploadFailed'));
+            }
+
+            uploadedPhotoUrls.push(uploadResult.publicUrl);
+          }
+        } finally {
+          setUploadingDraftPhotos(false);
+        }
+      }
+
+      await withTimeout(
+        destinationService.submitReview({
+          destination_id: destinationId,
+          rating,
+          comment: draftComment.trim() ? draftComment.trim() : null,
+          imageUrls: uploadedPhotoUrls,
+        }),
+        15000,
+        t('review.error.submitFailed', { reason: t('review.error.uploadTimeout') })
+      );
 
       setDraftComment('');
       setDraftRating(5);
+      setDraftPhotoAssets([]);
       setIsWritingReview(false);
+
+      addNotification({
+        message: t('review.success.submitDestination'),
+        type: 'success',
+        durationMs: 2400,
+      });
+
       await refreshReviews();
-    } catch (error) {
-      console.warn('submitReview failed:', error);
+    } catch (error: any) {
+      const rawMessage = String(error?.message ?? '').trim();
+      const lowerMessage = rawMessage.toLowerCase();
+
+      const reason = lowerMessage.includes('row-level security') || lowerMessage.includes('policy')
+        ? t('review.error.rlsBlocked')
+        : (rawMessage || t('review.error.uploadFailed'));
+
+      console.error('[ReviewSubmit][Destination] failed', {
+        destinationId,
+        currentUserId,
+        rating,
+        draftPhotoCount: draftPhotoAssets.length,
+        reason,
+        rawMessage,
+        error,
+      });
+
+      addNotification({
+        message: t('review.error.submitFailed', { reason }),
+        type: 'error',
+        durationMs: 4200,
+      });
     } finally {
+      setUploadingDraftPhotos(false);
       setSubmittingReview(false);
     }
-  }, [destinationId, draftComment, draftRating, refreshReviews]);
+  }, [
+    addNotification,
+    currentUserId,
+    destinationId,
+    draftComment,
+    draftPhotoAssets,
+    draftRating,
+    promptLogin,
+    refreshReviews,
+    t,
+  ]);
 
   const descriptionText = useMemo(() => {
     const raw =
@@ -700,92 +1192,145 @@ export default function DestinationDetailScreen() {
     return toAmenityList(destinationRow?.amenities ?? destinationRow?.features ?? destinationRow?.utilities);
   }, [destinationRow]);
 
-  const renderStars = useCallback(
-    (value: number, size: number) => (
-      <View style={styles.starsRow}>
-        {Array.from({ length: 5 }).map((_, idx) => {
-          const filled = idx < value;
-          return (
-            <MaterialCommunityIcons
-              key={idx}
-              name={filled ? 'star' : 'star-outline'}
-              size={size}
-              color={ExploreEaseColors.primary}
-            />
-          );
-        })}
-      </View>
-    ),
-    []
+  const destinationCategory = useMemo(() => toDestinationCategory(destinationRow), [destinationRow]);
+
+  const toSuggestionPrice = useCallback(
+    (value: number | null) => {
+      if (value === null) return '—';
+      if (value <= 0) return 'FREE';
+      return formatPricePerPerson(value);
+    },
+    [formatPricePerPerson]
   );
+
+  const recommendationItems = useMemo<YouMightAlsoLikeItem[]>(
+    () =>
+      (recommendations?.combined ?? []).map((item) => ({
+        ...item,
+        displayPrice: toSuggestionPrice(item.priceValue),
+      })),
+    [recommendations, toSuggestionPrice]
+  );
+
+  const activeRecommendationTimeOfDay = recommendations?.timeOfDay ?? effectiveRecommendationTimeOfDay;
+
+  const onPressRecommendationItem = useCallback((item: YouMightAlsoLikeItem) => {
+    if (item.kind === 'event') {
+      router.push(`/event/${item.id}` as any);
+      return;
+    }
+
+    router.push(
+      {
+        pathname: '/destination/[id]',
+        params: {
+          id: item.id,
+          name: item.title,
+          location: item.location,
+          price: item.displayPrice,
+          rating: typeof item.rating === 'number' ? item.rating.toFixed(1) : '',
+          imageUrl: item.imageUrl ?? '',
+        },
+      } as any
+    );
+  }, []);
+
+  const fetchContextualRecommendations = useCallback(async () => {
+    if (!destinationId) {
+      setRecommendations(null);
+      setLoadingRecommendations(false);
+      return;
+    }
+
+    setLoadingRecommendations(true);
+    try {
+      const result = await recommendationService.getPersonalizedRecommendationsForCurrentUser({
+        limitDestinations: 6,
+        limitEvents: 4,
+        timeOfDay: effectiveRecommendationTimeOfDay,
+        respectTimeOfDayWindow: true,
+        contextItem: {
+          kind: 'destination',
+          id: destinationId,
+          title: typeof destinationRow?.name === 'string' ? destinationRow.name : name,
+          category: destinationCategory,
+          location: typeof destinationRow?.location === 'string' ? destinationRow.location : (params.location ?? null),
+        },
+      });
+
+      setRecommendations(result);
+    } catch (err: any) {
+      console.warn('fetchContextualRecommendations failed:', err?.message ?? err);
+      setRecommendations(null);
+    } finally {
+      setLoadingRecommendations(false);
+    }
+  }, [
+    destinationCategory,
+    destinationId,
+    destinationRow,
+    effectiveRecommendationTimeOfDay,
+    name,
+    params.location,
+  ]);
+
+  useEffect(() => {
+    void fetchContextualRecommendations();
+  }, [fetchContextualRecommendations]);
 
   const renderReviewItem = useCallback(
     ({ item }: { item: ReviewRow }) => {
-      const reviewerName = item.profiles?.full_name ?? 'Ẩn danh';
+      const reviewerName = item.profiles?.full_name ?? t('review.card.anonymous');
       const avatarUrl = item.profiles?.avatar_url ?? null;
-
-      const cardBg = isDark ? 'rgba(255,255,255,0.92)' : '#ffffff';
-      const cardBorder = 'rgba(15, 23, 42, 0.10)';
+      const reviewId = String(item.id);
+      const helpfulCount = typeof item.helpful_count === 'number' ? item.helpful_count : 0;
+      const isHelpful = !!item.viewer_has_helpful_vote;
+      const isHelpfulLoading = helpfulPendingId === reviewId;
+      const reviewImageUrls = toReviewImageUrls(item.review_image_urls);
+      const replyDraft = replyDraftByReview[reviewId] ?? '';
+      const isReplyLoading = submittingReplyId === reviewId;
 
       return (
-        <View
-          style={[
-            styles.reviewCard,
-            {
-              borderRadius: s(16),
-              padding: s(14),
-              marginHorizontal: s(16),
-              backgroundColor: cardBg,
-              borderColor: cardBorder,
-            },
-          ]}
-        >
-          <View style={styles.reviewTopRow}>
-            <View
-              style={[
-                styles.avatarWrap,
-                {
-                  width: s(40),
-                  height: s(40),
-                  borderRadius: s(20),
-                  borderColor: 'rgba(15, 23, 42, 0.10)',
-                  backgroundColor: 'rgba(15, 23, 42, 0.04)',
-                },
-              ]}
-            >
-              {avatarUrl ? (
-                <Image source={{ uri: avatarUrl }} style={{ width: '100%', height: '100%', borderRadius: s(20) }} />
-              ) : (
-                <View style={{ flex: 1, borderRadius: s(20), backgroundColor: 'rgba(15, 23, 42, 0.10)' }} />
-              )}
-            </View>
-
-            <View style={{ flex: 1 }}>
-              <Text className="text-slate-950" style={{ fontWeight: '900', fontSize: s(14) }} numberOfLines={1}>
-                {reviewerName}
-              </Text>
-              <View style={styles.reviewStarsRow}>
-                {renderStars(Math.round(item.rating), s(14))}
-                <Text className="text-slate-950" style={{ fontWeight: '800', fontSize: s(12) }}>
-                  {Number(item.rating).toFixed(1)}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {item.comment ? (
-            <Text className="text-slate-950" style={{ fontWeight: '700', fontSize: s(13), marginTop: s(10), lineHeight: s(18) }}>
-              {item.comment}
-            </Text>
-          ) : (
-            <Text className="text-slate-950" style={{ fontWeight: '700', fontSize: s(13), marginTop: s(10), opacity: 0.6 }}>
-              (Không có bình luận)
-            </Text>
-          )}
-        </View>
+        <ReviewCard
+          isDark={isDark}
+          scale={s}
+          reviewerName={reviewerName}
+          avatarUrl={avatarUrl}
+          rating={Number(item.rating) || 0}
+          comment={item.comment ?? null}
+          createdAt={item.created_at ?? null}
+          imageUrls={reviewImageUrls}
+          helpfulCount={helpfulCount}
+          isHelpful={isHelpful}
+          helpfulLoading={isHelpfulLoading}
+          canReply={canReplyToReviews}
+          replyText={item.reply_text ?? null}
+          replyDraft={replyDraft}
+          replyLoading={isReplyLoading}
+          onChangeReplyDraft={(value) =>
+            setReplyDraftByReview((prev) => ({
+              ...prev,
+              [reviewId]: value,
+            }))
+          }
+          onSubmitReply={() => void submitReplyToReview(reviewId)}
+          onToggleHelpful={() => void onToggleHelpfulReview(item)}
+          onReport={() => openReportModal(reviewId)}
+        />
       );
     },
-    [isDark, renderStars, s]
+    [
+      canReplyToReviews,
+      helpfulPendingId,
+      isDark,
+      onToggleHelpfulReview,
+      openReportModal,
+      replyDraftByReview,
+      s,
+      submitReplyToReview,
+      submittingReplyId,
+      t,
+    ]
   );
 
   const listHeader = useMemo(() => {
@@ -942,6 +1487,24 @@ export default function DestinationDetailScreen() {
         </View>
 
         <View style={{ paddingHorizontal: s(16), marginTop: s(18) }}>
+          <TimeOfDayToggle
+            value={timeOfDayPreference}
+            onChange={setTimeOfDayPreference}
+            title={t('recommendation.timing.title')}
+          />
+
+          <YouMightAlsoLike
+            items={recommendationItems}
+            loading={loadingRecommendations}
+            timeOfDay={activeRecommendationTimeOfDay}
+            travelStyle={recommendations?.preferences.travelStyle ?? null}
+            onPressItem={onPressRecommendationItem}
+            title={t('recommendation.suggestions.title')}
+            subtitle={t('recommendation.suggestions.subtitleDestination')}
+          />
+        </View>
+
+        <View style={{ paddingHorizontal: s(16), marginTop: s(18) }}>
           <View style={[styles.locationHeaderRow, { marginBottom: s(12) }]}>
             <Text style={{ color: contentTitleColor, fontWeight: '900', fontSize: s(18) }}>Vị trí</Text>
             {isLoadingLocation ? (
@@ -1053,7 +1616,7 @@ export default function DestinationDetailScreen() {
         <View style={{ paddingHorizontal: s(16), marginTop: s(18) }}>
           <View style={styles.reviewsHeaderRow}>
             <View style={{ flex: 1, gap: s(4) }}>
-              <Text style={[styles.reviewsTitle, { fontSize: s(18), color: contentTitleColor }]}>Đánh giá</Text>
+              <Text style={[styles.reviewsTitle, { fontSize: s(18), color: contentTitleColor }]}>{t('review.section.title')}</Text>
               <Text
                 style={{
                   color: contentMutedColor,
@@ -1062,7 +1625,10 @@ export default function DestinationDetailScreen() {
                 }}
                 numberOfLines={1}
               >
-                ⭐ {averageRating !== null ? averageRating.toFixed(1) : '—'}/5 • {reviewsTotalCount ?? reviews.length}{' '}đánh giá
+                {t('review.section.summary', {
+                  rating: averageRating !== null ? averageRating.toFixed(1) : '—',
+                  count: reviewsTotalCount ?? reviews.length,
+                })}
               </Text>
             </View>
             <Pressable
@@ -1076,80 +1642,79 @@ export default function DestinationDetailScreen() {
               accessibilityRole="button"
             >
               <Text style={[styles.writeReviewText, { fontSize: s(13) }]}>
-                {isWritingReview ? 'Hủy' : 'Viết đánh giá'}
+                {isWritingReview ? t('review.section.cancel') : t('review.section.write')}
               </Text>
             </Pressable>
+          </View>
+
+          <RatingDistribution entries={ratingDistribution} isDark={isDark} scale={s} />
+
+          <View style={[styles.reviewSortRow, { marginTop: s(10), columnGap: s(8), rowGap: s(8) }]}>
+            {([
+              { value: 'newest' as const, label: t('review.sort.newest') },
+              { value: 'highest' as const, label: t('review.sort.highest') },
+              { value: 'lowest' as const, label: t('review.sort.lowest') },
+              { value: 'most-helpful' as const, label: t('review.sort.helpful') },
+            ]).map((option) => {
+              const active = reviewSort === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => setReviewSort(option.value)}
+                  style={({ pressed }) => [
+                    styles.reviewSortChip,
+                    {
+                      minHeight: s(34),
+                      borderRadius: 999,
+                      paddingHorizontal: s(12),
+                      backgroundColor: active
+                        ? 'rgba(34, 211, 238, 0.16)'
+                        : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)'),
+                      borderColor: active
+                        ? 'rgba(34, 211, 238, 0.45)'
+                        : (isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)'),
+                    },
+                    pressed ? { opacity: 0.84 } : null,
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <Text
+                    style={{
+                      fontWeight: '800',
+                      fontSize: s(12),
+                      color: active ? ExploreEaseColors.primary : contentMutedColor,
+                    }}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
 
           {loadingReviews ? (
             <View style={[styles.loadingRow, { marginTop: s(10) }]}>
               <ActivityIndicator color={ExploreEaseColors.primary} />
-              <Text style={[styles.loadingText, { fontSize: s(13), color: contentMutedColor }]}>Đang tải đánh giá...</Text>
+              <Text style={[styles.loadingText, { fontSize: s(13), color: contentMutedColor }]}>{t('review.section.loading')}</Text>
             </View>
           ) : null}
 
           {isWritingReview ? (
-            <BlurView intensity={Platform.OS === 'web' ? 16 : 24} tint="dark" style={[styles.writeReviewCard, { borderRadius: s(16), padding: s(14), marginTop: s(12) }]}>
-              <Text style={[styles.inputLabel, { fontSize: s(12), color: contentMutedColor }]}>Số sao</Text>
-              <View style={[styles.pickStarsRow, { marginTop: s(8) }]}>
-                {Array.from({ length: 5 }).map((_, idx) => {
-                  const value = idx + 1;
-                  const filled = value <= draftRating;
-                  return (
-                    <Pressable
-                      key={value}
-                      onPress={() => setDraftRating(value)}
-                      style={({ pressed }) => [pressed ? { opacity: 0.85 } : null]}
-                      accessibilityRole="button"
-                    >
-                      <MaterialCommunityIcons
-                        name={filled ? 'star' : 'star-outline'}
-                        size={s(22)}
-                        color={ExploreEaseColors.primary}
-                      />
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <Text style={[styles.inputLabel, { fontSize: s(12), marginTop: s(12), color: contentMutedColor }]}>Nhận xét</Text>
-              <TextInput
-                value={draftComment}
-                onChangeText={setDraftComment}
-                placeholder="Chia sẻ trải nghiệm của bạn..."
-                placeholderTextColor={isDark ? 'rgba(148,163,184,0.65)' : 'rgba(71,85,105,0.55)'}
-                multiline
-                style={[
-                  styles.commentInput,
-                  {
-                    minHeight: s(88),
-                    borderRadius: s(14),
-                    padding: s(12),
-                    fontSize: s(13),
-                    color: isDark ? '#ffffff' : '#0f172a',
-                    backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)',
-                    borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.10)',
-                  },
-                ]}
-              />
-
-              <Pressable
-                onPress={onSubmitReview}
-                disabled={submittingReview}
-                style={({ pressed, hovered }) => [
-                  styles.submitBtn,
-                  { height: s(44), borderRadius: s(14), marginTop: s(12) },
-                  (Platform.OS === 'web' && hovered) ? { opacity: 0.96 } : null,
-                  pressed ? { opacity: 0.86 } : null,
-                  submittingReview ? { opacity: 0.7 } : null,
-                ]}
-                accessibilityRole="button"
-              >
-                <Text style={[styles.submitText, { fontSize: s(14) }]}>
-                  {submittingReview ? 'Đang gửi...' : 'Gửi đánh giá'}
-                </Text>
-              </Pressable>
-            </BlurView>
+            <ReviewForm
+              isDark={isDark}
+              scale={s}
+              rating={draftRating}
+              comment={draftComment}
+              photoUris={draftPhotoAssets.map((asset) => asset.uri)}
+              maxPhotos={MAX_REVIEW_PHOTOS}
+              submitting={submittingReview}
+              uploadingPhotos={uploadingDraftPhotos}
+              onChangeRating={setDraftRating}
+              onChangeComment={setDraftComment}
+              onPickPhotos={() => void pickReviewPhotos()}
+              onRemovePhoto={removeDraftPhoto}
+              onSubmit={onSubmitReview}
+            />
           ) : null}
         </View>
 
@@ -1172,11 +1737,16 @@ export default function DestinationDetailScreen() {
     locationErrorMsg,
     loadingFavorite,
     draftComment,
+    draftPhotoAssets,
     draftRating,
     headerHeight,
     imageUrl,
     isWritingReview,
     loadingReviews,
+    pickReviewPhotos,
+    ratingDistribution,
+    removeDraftPhoto,
+    reviewSort,
     reviews.length,
     reviewsTotalCount,
     loadingDestination,
@@ -1184,9 +1754,19 @@ export default function DestinationDetailScreen() {
     onToggleFavorite,
     onPressWriteReview,
     onSubmitReview,
+    onPressRecommendationItem,
+    recommendationItems,
+    loadingRecommendations,
+    activeRecommendationTimeOfDay,
+    recommendations,
     s,
+    setTimeOfDayPreference,
+    setReviewSort,
     submittingReview,
+    timeOfDayPreference,
     togglingFavorite,
+    t,
+    uploadingDraftPhotos,
   ]);
 
   const pageBg = isDark ? ExploreEaseColors.background : '#f8fafc';
@@ -1483,9 +2063,19 @@ export default function DestinationDetailScreen() {
           </Pressable>
         </Modal>
 
+        <ModerationModal
+          visible={reportModalVisible}
+          isDark={isDark}
+          reason={reportReason}
+          submitting={submittingReport}
+          onClose={() => setReportModalVisible(false)}
+          onChangeReason={setReportReason}
+          onSubmit={() => void submitReviewReport()}
+        />
+
         <FlatList
           ref={listRef}
-          data={reviews}
+          data={sortedReviews}
           renderItem={renderReviewItem}
           keyExtractor={(item) => String(item.id)}
           ListHeaderComponent={listHeader}
@@ -1900,15 +2490,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.18)',
   },
 
-  floatingCardWrap: { width: '100%' },
-  floatingCard: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-    overflow: 'hidden',
-  },
-  cardTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  cardName: { color: 'white', fontWeight: '900' },
   ratingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1920,14 +2501,7 @@ const styles = StyleSheet.create({
   },
   ratingText: { color: ExploreEaseColors.primary, fontWeight: '800' },
 
-  metaRow: {},
-  metaLabel: { color: 'rgba(148,163,184,0.95)', fontWeight: '800' },
-  metaValue: { color: 'white', fontWeight: '900', marginTop: 6 },
-
   locationHeaderRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
-  locationTitle: { fontWeight: '900' },
-  distanceText: { fontWeight: '800' },
-  // Map UI moved to MapRedirectCard
 
   reviewsHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   reviewsTitle: { fontWeight: '900' },
@@ -1943,45 +2517,16 @@ const styles = StyleSheet.create({
   loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   loadingText: { fontWeight: '700' },
 
-  writeReviewCard: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-    overflow: 'hidden',
+  reviewSortRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
   },
-  inputLabel: { fontWeight: '900' },
-  pickStarsRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  commentInput: {
-    marginTop: 8,
+  reviewSortChip: {
     borderWidth: 1,
-    textAlignVertical: 'top',
-  },
-  submitBtn: {
-    backgroundColor: ExploreEaseColors.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  submitText: { color: ExploreEaseColors.background, fontWeight: '900' },
-
-  reviewCard: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-    overflow: 'hidden',
-  },
-  reviewTopRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatarWrap: {
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  avatarFallback: { flex: 1, backgroundColor: 'rgba(148,163,184,0.18)' },
-  reviewName: { color: 'white', fontWeight: '900' },
-  reviewStarsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  starsRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  reviewRatingText: { color: 'rgba(148,163,184,0.95)', fontWeight: '800' },
-  reviewComment: { color: 'rgba(226,232,240,0.95)', fontWeight: '600', lineHeight: 18 },
 
   footerWrap: {
     width: '100%',

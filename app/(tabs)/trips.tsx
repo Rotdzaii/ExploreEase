@@ -7,7 +7,7 @@ import { useTheme } from '@/src/context/theme';
 import { itineraryService } from '@/src/services/itineraryService';
 import { reminderService } from '@/src/services/reminderService';
 import { supabase } from '@/src/services/supabase';
-import { tripService, type TripRow } from '@/src/services/tripService';
+import { type TripRow } from '@/src/services/tripService';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
@@ -102,7 +102,7 @@ export default function TripsScreen() {
     setTripsError(null);
 
     try {
-      const rows = await tripService.getTripsForCurrentUser();
+      const rows = await itineraryService.getTripsForCurrentUser();
       setTrips((rows ?? []).map(mapTripRowToTrip));
     } catch (err: any) {
       console.warn('loadTrips failed:', err?.message ?? err);
@@ -139,7 +139,7 @@ export default function TripsScreen() {
     try {
       const todayIso = new Date().toISOString().slice(0, 10);
       const payload = {
-        name: 'Chuyến đi mới',
+        title: 'Chuyến đi mới',
         destination: null,
         cover: null,
         start_date: todayIso,
@@ -147,13 +147,12 @@ export default function TripsScreen() {
       };
 
       console.log('[TripsScreen] createTrip payload:', payload);
-      const newRow = await tripService.createTripForCurrentUser(payload);
+      const newRow = await itineraryService.createTripForCurrentUser(payload);
       console.log('[TripsScreen] createTrip success:', newRow);
 
       const newTrip = mapTripRowToTrip(newRow);
       setTrips((prev) => [newTrip, ...(prev ?? [])]);
-      setSelectedTrip(newTrip);
-      setSelectedDay(1);
+      router.push(`/itinerary/${newTrip.id}` as any);
       setTripsError(null);
     } catch (err: any) {
       console.log('[TripsScreen] createTrip error:', err);
@@ -178,9 +177,7 @@ export default function TripsScreen() {
   }, [selectedTrip]);
 
   const handleSelectTrip = useCallback((trip: Trip) => {
-    setSelectedTrip(trip);
-    setSelectedDay(1);
-    setOptimized(false);
+    router.push(`/itinerary/${trip.id}` as any);
   }, []);
 
   const handleBack = useCallback(() => {
