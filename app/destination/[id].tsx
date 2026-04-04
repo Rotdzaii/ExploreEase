@@ -390,7 +390,7 @@ export default function DestinationDetailScreen() {
       console.warn('ensureLoggedIn failed:', err?.message ?? err);
     }
 
-    Alert.alert('Cần đăng nhập', 'Vui lòng đăng nhập để thêm địa điểm vào kế hoạch.', [
+    Alert.alert('Cần đăng nhập', 'Vui lòng đăng nhập để thêm điểm đến vào kế hoạch.', [
       { text: 'Hủy', style: 'cancel' },
       { text: 'Đăng nhập', onPress: () => router.push('/login' as any) },
     ]);
@@ -2029,7 +2029,7 @@ export default function DestinationDetailScreen() {
                 Chưa có chuyến đi
               </Text>
               <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#94a3b8' : '#64748b', lineHeight: 18 }}>
-                Bạn cần tạo ít nhất một chuyến đi trước khi thêm địa điểm này.
+                Bạn cần tạo ít nhất một chuyến đi trước khi thêm điểm đến này.
               </Text>
 
               <Pressable

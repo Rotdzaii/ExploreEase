@@ -1364,8 +1364,8 @@ export default function EventDetailScreen() {
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>Ke hoach du lich</Text>
-          <Text style={[styles.sectionText, { color: colors.text }]}>Them su kien nay vao lich trinh theo tung ngay.</Text>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>Kế hoạch du lịch</Text>
+          <Text style={[styles.sectionText, { color: colors.text }]}>Thêm sự kiện này vào lịch trình theo từng ngày.</Text>
 
           <Pressable
             onPress={() => void onPressAddToPlan()}
@@ -1376,14 +1376,14 @@ export default function EventDetailScreen() {
               pressed ? { opacity: 0.84 } : null,
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Them su kien vao ke hoach"
+            accessibilityLabel="Thêm sự kiện vào kế hoạch"
           >
             {addingToPlan ? (
               <ActivityIndicator color="#001018" />
             ) : (
-              <Feather name="plus-circle" size={18} color="#001018" />
+              <MaterialCommunityIcons name="playlist-plus" size={18} color="#001018" />
             )}
-            <Text style={styles.planButtonText}>{addingToPlan ? 'Dang them...' : 'Them vao ke hoach'}</Text>
+            <Text style={styles.planButtonText}>{addingToPlan ? 'Đang thêm...' : 'Thêm vào kế hoạch'}</Text>
           </Pressable>
         </View>
 
