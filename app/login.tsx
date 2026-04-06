@@ -141,7 +141,7 @@ export default function LoginScreen() {
     };
 
     finishGoogleLogin();
-  }, [googleResponse]);
+  }, [googleResponse, t]);
 
   const validate = () => {
     let newErrors: any = {};
@@ -231,7 +231,6 @@ export default function LoginScreen() {
       // Thêm dòng này vào hàm xử lý khi nhấn nút Login
       const rUri = AuthSession.makeRedirectUri({
         path: 'login', // Hoặc path cậu đang dùng
-        preferLink: true,
       });
       console.log('--- ĐỊA CHỈ REDIRECT ĐÂY NÈ ---');
       console.log(rUri);

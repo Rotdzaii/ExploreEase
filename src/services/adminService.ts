@@ -206,14 +206,14 @@ export const adminService = {
 
     if (reportsErr) throw reportsErr;
 
-    const reportRows = (reports ?? []) as Array<{
+    const reportRows = (reports ?? []) as {
       id: string;
       review_id: string;
       reporter_id: string;
       reason: string;
       status: string;
       created_at: string;
-    }>;
+    }[];
 
     const reviewIds = unique(reportRows.map((row) => String(row.review_id ?? '')).filter(Boolean));
 
@@ -224,14 +224,14 @@ export const adminService = {
         .select('id, user_id, rating, comment, destination_id, created_at')
         .in('id', reviewIds);
 
-      const reviewRows = (reviews ?? []) as Array<{
+      const reviewRows = (reviews ?? []) as {
         id: string;
         user_id: string;
         rating: number;
         comment?: string | null;
         destination_id?: string | number | null;
         created_at?: string | null;
-      }>;
+      }[];
 
       for (const review of reviewRows) {
         reviewsById.set(String(review.id), {

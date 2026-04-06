@@ -367,7 +367,7 @@ export const destinationService = {
 
     if (reviewsRes.error) throw reviewsRes.error;
 
-    const rows = (reviewsRes.data ?? []) as ReviewRow[];
+    const rows = (reviewsRes.data ?? []) as unknown as ReviewRow[];
     const userIds = Array.from(new Set(rows.map((r) => r.user_id).filter(Boolean)));
     const reviewIds = rows.map((r) => r.id).filter(Boolean);
 
@@ -469,7 +469,7 @@ export const destinationService = {
 
     if (reviewsRes.error) throw reviewsRes.error;
 
-    const rows = (reviewsRes.data ?? []) as ReviewRow[];
+    const rows = (reviewsRes.data ?? []) as unknown as ReviewRow[];
     const userIds = Array.from(new Set(rows.map((r) => r.user_id).filter(Boolean)));
     const reviewIds = rows.map((r) => r.id).filter(Boolean);
 

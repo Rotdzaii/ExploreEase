@@ -24,7 +24,7 @@ export function useProtectedRoute() {
     const firstSegment = segments[0];
     const inPublicAuthSegment =
       typeof firstSegment === 'string' && PUBLIC_AUTH_SEGMENTS.has(firstSegment);
-    const isRootIndex = segments.length === 0;
+    const isRootIndex = segments.join('/') === '';
 
     if (!session && !inPublicAuthSegment) {
       router.replace('/login');

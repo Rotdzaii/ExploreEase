@@ -181,6 +181,7 @@ export function PopularDestinations({ styles, destinations }: PopularDestination
       onPressDestination,
       ratingIconSize,
       styles,
+      t,
     ]
   );
 

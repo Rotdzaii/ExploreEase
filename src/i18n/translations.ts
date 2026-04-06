@@ -566,11 +566,6 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
 
     'recommendation.timing.title': 'Thời điểm gợi ý',
     'recommendation.timing.subtitle': 'Cá nhân hóa gợi ý theo khoảng thời gian bạn ưu tiên.',
-    'recommendation.timing.auto': 'Tự động',
-    'recommendation.timing.morning': 'Buổi sáng',
-    'recommendation.timing.afternoon': 'Buổi chiều',
-    'recommendation.timing.evening': 'Buổi tối',
-    'recommendation.timing.night': 'Ban đêm',
 
     'recommendation.suggestions.title': 'Gợi ý dành cho bạn',
     'recommendation.suggestions.subtitleTailored': 'Phù hợp với {timeOfDay}',
@@ -1226,11 +1221,6 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
 
     'recommendation.timing.title': 'Recommendation timing',
     'recommendation.timing.subtitle': 'Personalize recommendations by your preferred moment',
-    'recommendation.timing.auto': 'Auto',
-    'recommendation.timing.morning': 'Morning',
-    'recommendation.timing.afternoon': 'Afternoon',
-    'recommendation.timing.evening': 'Evening',
-    'recommendation.timing.night': 'Night',
 
     'recommendation.suggestions.title': 'You might also like',
     'recommendation.suggestions.subtitleTailored': 'Tailored for {timeOfDay}',

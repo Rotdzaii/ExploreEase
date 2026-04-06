@@ -1992,15 +1992,15 @@ export default function DestinationDetailScreen() {
                     {t('destination.trip.pickTrip')}
                   </Text>
                   <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 10 }}>
-                    {trips.map((t) => {
-                      const start = parseDateOnly(t.start_date ?? null);
-                      const end = parseDateOnly(t.end_date ?? null);
+                    {trips.map((trip) => {
+                      const start = parseDateOnly(trip.start_date ?? null);
+                      const end = parseDateOnly(trip.end_date ?? null);
                       const daysCount = toDaysCount(start, end);
                       return (
                         <Pressable
-                          key={t.id}
+                          key={trip.id}
                           onPress={() => {
-                            setSelectedTripRow(t);
+                            setSelectedTripRow(trip);
                             setSelectedTripDay(1);
                           }}
                           style={({ pressed, hovered }) => [
@@ -2018,10 +2018,10 @@ export default function DestinationDetailScreen() {
                           accessibilityRole="button"
                         >
                           <Text style={{ fontWeight: '900', fontSize: 14, color: isDark ? '#ffffff' : '#0f172a' }} numberOfLines={1}>
-                            {t.name}
+                            {trip.name}
                           </Text>
                           <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }} numberOfLines={2}>
-                            {(t.destination ?? '').trim() ? `${t.destination} • ` : ''}{t('trips.card.days', { count: daysCount })}
+                            {(trip.destination ?? '').trim() ? `${trip.destination} • ` : ''}{t('trips.card.days', { count: daysCount })}
                           </Text>
                         </Pressable>
                       );
@@ -2457,15 +2457,15 @@ export default function DestinationDetailScreen() {
                   </Text>
 
                   <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 10 }}>
-                    {trips.map((t) => {
-                      const start = parseDateOnly(t.start_date ?? null);
-                      const end = parseDateOnly(t.end_date ?? null);
+                    {trips.map((trip) => {
+                      const start = parseDateOnly(trip.start_date ?? null);
+                      const end = parseDateOnly(trip.end_date ?? null);
                       const daysCount = toDaysCount(start, end);
                       return (
                         <Pressable
-                          key={t.id}
+                          key={trip.id}
                           onPress={() => {
-                            setSelectedTripRow(t);
+                            setSelectedTripRow(trip);
                             setSelectedTripDay(1);
                           }}
                           style={({ pressed, hovered }) => [
@@ -2483,10 +2483,10 @@ export default function DestinationDetailScreen() {
                           accessibilityRole="button"
                         >
                           <Text style={{ fontWeight: '900', fontSize: 14, color: isDark ? '#ffffff' : '#0f172a' }} numberOfLines={1}>
-                            {t.name}
+                            {trip.name}
                           </Text>
                           <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }} numberOfLines={2}>
-                            {(t.destination ?? '').trim() ? `${t.destination} • ` : ''}{t('trips.card.days', { count: daysCount })}
+                            {(trip.destination ?? '').trim() ? `${trip.destination} • ` : ''}{t('trips.card.days', { count: daysCount })}
                           </Text>
                         </Pressable>
                       );

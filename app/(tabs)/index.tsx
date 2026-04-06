@@ -298,9 +298,7 @@ export default function HomeScreen() {
 
     try {
       const transcript = await transcribeAudioUri(recordingUri, {
-        languageCode: 'vi-VN',
-        alternativeLanguageCodes: ['en-US'],
-        maxAlternatives: 1,
+        language: 'vi',
       });
 
       const query = transcript.trim();

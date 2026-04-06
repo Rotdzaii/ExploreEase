@@ -59,24 +59,6 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
   }
 }
 
-const formatDateTime = (value?: string | null) => {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString('vi-VN');
-};
-
-const formatPrice = (value: number) => {
-  if (value <= 0) return 'FREE';
-  return `${value.toLocaleString('vi-VN')} đ`;
-};
-
-const statusLabel = (status: EventStatus) => {
-  if (status === 'ongoing') return 'Đang diễn ra';
-  if (status === 'completed') return 'Đã kết thúc';
-  return 'Sắp diễn ra';
-};
-
 const getCountdownParts = (totalMs: number) => {
   const safeMs = Math.max(0, totalMs);
   const totalSeconds = Math.floor(safeMs / 1000);
