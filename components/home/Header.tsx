@@ -15,6 +15,7 @@ type HeaderProps = {
   isDarkMode: boolean;
   badgeCount?: number;
   onPressNotifications?: () => void;
+  showNotificationsButton?: boolean;
 };
 
 export function Header({
@@ -24,6 +25,7 @@ export function Header({
   isDarkMode,
   badgeCount,
   onPressNotifications,
+  showNotificationsButton = true,
 }: HeaderProps) {
   const { t } = useI18n();
   const globalUnreadCount = useNotificationStore((s) => s.unreadCount);
@@ -64,29 +66,31 @@ export function Header({
           </View>
         </View>
 
-        <View style={styles.headerActions}>
-          <Pressable
-            style={({ pressed, hovered }) => [
-              styles.notifBtn,
-              (Platform.OS === 'web' && hovered) ? { transform: [{ scale: 1.03 }], opacity: 0.96 } : null,
-              pressed ? { opacity: 0.85, transform: [{ scale: 0.98 }] } : null,
-            ]}
-            onPress={onPressNotifications}
-            accessibilityRole="button"
-            accessibilityLabel={safeCount > 0 ? t('home.notificationsWithCount', { count: safeCount }) : t('home.notifications')}
-          >
-            <MaterialCommunityIcons
-              name="bell-outline"
-              size={20}
-              color={ExploreEaseColors.primary}
-            />
-            {safeCount > 0 ? (
-              <View style={styles.notifBadge} pointerEvents="none">
-                <Text style={styles.notifBadgeText}>{badgeText}</Text>
-              </View>
-            ) : null}
-          </Pressable>
-        </View>
+        {showNotificationsButton ? (
+          <View style={styles.headerActions}>
+            <Pressable
+              style={({ pressed, hovered }) => [
+                styles.notifBtn,
+                (Platform.OS === 'web' && hovered) ? { transform: [{ scale: 1.03 }], opacity: 0.96 } : null,
+                pressed ? { opacity: 0.85, transform: [{ scale: 0.98 }] } : null,
+              ]}
+              onPress={onPressNotifications}
+              accessibilityRole="button"
+              accessibilityLabel={safeCount > 0 ? t('home.notificationsWithCount', { count: safeCount }) : t('home.notifications')}
+            >
+              <MaterialCommunityIcons
+                name="bell-outline"
+                size={20}
+                color={ExploreEaseColors.primary}
+              />
+              {safeCount > 0 ? (
+                <View style={styles.notifBadge} pointerEvents="none">
+                  <Text style={styles.notifBadgeText}>{badgeText}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
     </View>

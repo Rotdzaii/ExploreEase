@@ -204,6 +204,8 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
     'notifications.markAllDone': 'Đã đọc hết',
     'notifications.emptyTitle': 'Chưa có thông báo',
     'notifications.emptyDescription': 'Khi có tương tác mới (phản hồi đánh giá, trạng thái sự kiện...), thông báo sẽ hiện ở đây.',
+    'notifications.popover.empty': 'Không có thông báo gần đây.',
+    'notifications.popover.viewAll': 'Xem tất cả thông báo',
     'home.category.beaches': 'Biển',
     'home.category.mountains': 'Núi',
     'home.category.cities': 'Thành phố',
@@ -566,6 +568,11 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
 
     'recommendation.timing.title': 'Thời điểm gợi ý',
     'recommendation.timing.subtitle': 'Cá nhân hóa gợi ý theo khoảng thời gian bạn ưu tiên.',
+    'recommendation.timing.auto': 'Tự động',
+    'recommendation.timing.morning': 'Buổi sáng',
+    'recommendation.timing.afternoon': 'Buổi chiều',
+    'recommendation.timing.evening': 'Buổi tối',
+    'recommendation.timing.night': 'Đêm',
 
     'recommendation.suggestions.title': 'Gợi ý dành cho bạn',
     'recommendation.suggestions.subtitleTailored': 'Phù hợp với {timeOfDay}',
@@ -859,6 +866,8 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
     'notifications.markAllDone': 'Mark all read',
     'notifications.emptyTitle': 'No notifications yet',
     'notifications.emptyDescription': 'New interactions (review replies, event status updates, etc.) will appear here.',
+    'notifications.popover.empty': 'No recent notifications.',
+    'notifications.popover.viewAll': 'View all notifications',
     'home.category.beaches': 'Beaches',
     'home.category.mountains': 'Mountains',
     'home.category.cities': 'Cities',
@@ -1221,6 +1230,11 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
 
     'recommendation.timing.title': 'Recommendation timing',
     'recommendation.timing.subtitle': 'Personalize recommendations by your preferred moment',
+    'recommendation.timing.auto': 'Auto',
+    'recommendation.timing.morning': 'Morning',
+    'recommendation.timing.afternoon': 'Afternoon',
+    'recommendation.timing.evening': 'Evening',
+    'recommendation.timing.night': 'Night',
 
     'recommendation.suggestions.title': 'You might also like',
     'recommendation.suggestions.subtitleTailored': 'Tailored for {timeOfDay}',

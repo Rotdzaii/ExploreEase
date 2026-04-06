@@ -77,8 +77,8 @@ export default function HomeScreen() {
   const { isDark } = useTheme();
   const { t } = useI18n();
   const { formatPricePerPerson } = useCurrency();
-  const [notifications, setNotifications] = useState<NotificationRow[]>([]);
-  const [pendingRemindersCount, setPendingRemindersCount] = useState(0);
+  const [, setNotifications] = useState<NotificationRow[]>([]);
+  const [, setPendingRemindersCount] = useState(0);
   const [searchText, setSearchText] = useState('');
   const [voiceSearchState, setVoiceSearchState] = useState<VoiceSearchState>('idle');
   const timeOfDayPreference = useRecommendationPreferencesStore((s) => s.timeOfDayPreference);
@@ -363,10 +363,6 @@ export default function HomeScreen() {
       console.warn('fetchUnreadNotifications failed:', err?.message ?? err);
       setNotifications([]);
     }
-  }, []);
-
-  const onPressBell = useCallback(() => {
-    router.push('/notifications' as any);
   }, []);
 
   const onPressPersonalizedItem = useCallback((item: YouMightAlsoLikeItem) => {
@@ -664,8 +660,7 @@ export default function HomeScreen() {
               name={displayName}
               avatarUrl={avatarUrl}
               isDarkMode={isDark}
-              badgeCount={notifications.length + pendingRemindersCount}
-              onPressNotifications={onPressBell}
+              showNotificationsButton={false}
             />
 
             <SearchBar
