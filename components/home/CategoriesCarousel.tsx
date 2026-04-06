@@ -1,4 +1,5 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
@@ -25,15 +26,16 @@ export function CategoriesCarousel({
   initialActiveId = 'beaches',
   onChange,
 }: CategoriesCarouselProps) {
+  const { t } = useI18n();
   const categories = useMemo<CategoryItem[]>(
     () =>
       categoriesProp ?? [
-        { id: 'mountains', label: 'Mountains' },
-        { id: 'beaches', label: 'Beaches' },
-        { id: 'cities', label: 'Cities' },
-        { id: 'camping', label: 'Camping' },
+        { id: 'mountains', label: t('home.category.mountains') },
+        { id: 'beaches', label: t('home.category.beaches') },
+        { id: 'cities', label: t('home.category.cities') },
+        { id: 'camping', label: t('home.category.camping') },
       ],
-    [categoriesProp]
+    [categoriesProp, t]
   );
 
   const iconForCategory = (label: string) => {

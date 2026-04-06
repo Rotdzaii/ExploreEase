@@ -1,4 +1,5 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -24,6 +25,7 @@ export function Header({
   badgeCount,
   onPressNotifications,
 }: HeaderProps) {
+  const { t } = useI18n();
   const globalUnreadCount = useNotificationStore((s) => s.unreadCount);
   const externalCount = typeof badgeCount === 'number' && Number.isFinite(badgeCount) ? Math.max(0, badgeCount) : 0;
   const safeCount = externalCount + Math.max(0, globalUnreadCount);
@@ -42,7 +44,7 @@ export function Header({
           <Pressable
             onPress={() => router.push('/(tabs)/profile' as any)}
             accessibilityRole="button"
-            accessibilityLabel="Mở trang cá nhân"
+            accessibilityLabel={t('home.openProfile')}
             style={({ pressed, hovered }) => [
               styles.avatarRing,
               (Platform.OS === 'web' && hovered) ? { transform: [{ scale: 1.02 }], opacity: 0.98 } : null,
@@ -57,8 +59,8 @@ export function Header({
           </Pressable>
 
           <View>
-            <Text style={styles.welcomeSub}>Welcome back</Text>
-            <Text style={styles.welcomeMain}>Hello, {name}</Text>
+            <Text style={styles.welcomeSub}>{t('home.welcomeBack')}</Text>
+            <Text style={styles.welcomeMain}>{t('home.helloName', { name })}</Text>
           </View>
         </View>
 
@@ -71,7 +73,7 @@ export function Header({
             ]}
             onPress={onPressNotifications}
             accessibilityRole="button"
-            accessibilityLabel={safeCount > 0 ? `Thông báo (${safeCount})` : 'Thông báo'}
+            accessibilityLabel={safeCount > 0 ? t('home.notificationsWithCount', { count: safeCount }) : t('home.notifications')}
           >
             <MaterialCommunityIcons
               name="bell-outline"

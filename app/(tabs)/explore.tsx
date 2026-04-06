@@ -2,6 +2,7 @@ import { CreateEventForm, type EventFormData } from '@/components/events/CreateE
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useLocation } from '@/hooks/useLocation';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import {
     destinationService,
     type DestinationDiscoveryRow,
@@ -18,7 +19,6 @@ import {
     geocodeLocationText,
     getEffectiveTargetLocation,
     getHaversineDistance,
-    isWithinRadiusKm,
     resolveEntityCoords,
     useLocationOverrideStore,
 } from '@/utils/location';
@@ -50,19 +50,6 @@ type CategoryRow = {
   name: string;
 };
 
-const STATIC_EVENT_CATEGORIES = [
-  'Music',
-  'Food',
-  'Wellness',
-  'Art',
-  'Sports',
-  'Tech',
-  'Education',
-  'Entertainment',
-  'Networking',
-  'Charity',
-];
-
 const FALLBACK_DESTINATION_IMAGE =
   'https://images.unsplash.com/photo-1500375592092-40eb2168fd21?auto=format&fit=crop&w=1400&q=80';
 
@@ -73,19 +60,8 @@ type EventDateFilter = 'all' | 'today' | 'next-7-days' | 'this-month';
 
 const DISCOVERY_PAGE_SIZE = 20;
 const PRELOAD_SCROLL_THRESHOLD = 0.5;
-
-const formatDateTime = (value: string | null | undefined) => {
-  if (!value) return 'N/A';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString('vi-VN');
-};
-
-const getEventStatusLabel = (status: EventStatus) => {
-  if (status === 'ongoing') return 'Ongoing';
-  if (status === 'completed') return 'Completed';
-  return 'Incoming';
-};
+const NEARBY_RADIUS_KM = 5;
+const NEARBY_RADIUS_METERS = NEARBY_RADIUS_KM * 1000;
 
 const getEventDateRange = (filter: EventDateFilter) => {
   if (filter === 'all') {
@@ -120,30 +96,13 @@ const getEventDateRange = (filter: EventDateFilter) => {
   return { startFrom: start, endTo: end } as const;
 };
 
-const formatEventPrice = (value: number | null | undefined) => {
-  const num = typeof value === 'number' && Number.isFinite(value) ? value : 0;
-  if (num <= 0) return 'FREE';
-  return `${num.toLocaleString('vi-VN')} đ`;
-};
-
-const formatDestinationPrice = (value: unknown) => {
-  const amount = parseMoneyToNumber(value);
-  if (amount === null) return 'N/A';
-  if (amount <= 0) return 'FREE';
-  return `${amount.toLocaleString('vi-VN')} đ`;
-};
-
-const toCategoryName = (item: DestinationDiscoveryRow) => {
-  const rel = item.categories as any;
-  const fromRelation = typeof rel?.name === 'string' ? rel.name.trim() : '';
-  if (fromRelation) return fromRelation;
-  return 'General';
-};
 
 export default function ExploreScreen() {
   const { isDark } = useTheme();
+  const { t, language } = useI18n();
   const addNotification = useNotificationStore((s) => s.addNotification);
   const { location: gpsLocation, errorMsg: gpsErrorMsg, isLoading: isLoadingGps } = useLocation();
+  const locale = language === 'en' ? 'en-US' : 'vi-VN';
 
   const isManualLocationEnabled = useLocationOverrideStore((s) => s.useManualLocation);
   const manualLocationText = useLocationOverrideStore((s) => s.manualLocationText);
@@ -161,6 +120,7 @@ export default function ExploreScreen() {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [eventCategories, setEventCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [eventDateFilter, setEventDateFilter] = useState<EventDateFilter>('all');
   const [eventStatusFilter, setEventStatusFilter] = useState<EventStatus | 'all'>('all');
@@ -184,6 +144,39 @@ export default function ExploreScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  const formatDateTimeText = useCallback((value: string | null | undefined) => {
+    if (!value) return t('common.na');
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString(locale);
+  }, [locale, t]);
+
+  const getEventStatusLabel = useCallback((status: EventStatus) => {
+    if (status === 'ongoing') return t('event.status.ongoing');
+    if (status === 'completed') return t('event.status.completed');
+    return t('event.status.incoming');
+  }, [t]);
+
+  const formatEventPriceText = useCallback((value: number | null | undefined) => {
+    const num = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    if (num <= 0) return t('common.free');
+    return `${num.toLocaleString(locale)} ${t('common.currencyVndShort')}`;
+  }, [locale, t]);
+
+  const formatDestinationPriceText = useCallback((value: unknown) => {
+    const amount = parseMoneyToNumber(value);
+    if (amount === null) return t('common.na');
+    if (amount <= 0) return t('common.free');
+    return `${amount.toLocaleString(locale)} ${t('common.currencyVndShort')}`;
+  }, [locale, t]);
+
+  const toCategoryName = useCallback((item: DestinationDiscoveryRow) => {
+    const rel = item.categories as any;
+    const fromRelation = typeof rel?.name === 'string' ? rel.name.trim() : '';
+    if (fromRelation) return fromRelation;
+    return t('explore.category.general');
+  }, [t]);
 
   const colors = useMemo(
     () => ({
@@ -216,7 +209,7 @@ export default function ExploreScreen() {
     const fromDestinations = categories.map((c) => c.name).filter(Boolean);
     const fromEvents = events.map((e) => String(e.category ?? '').trim()).filter(Boolean);
 
-    const merged = ['all', ...STATIC_EVENT_CATEGORIES, ...fromDestinations, ...fromEvents];
+    const merged = ['all', ...eventCategories, ...fromDestinations, ...fromEvents];
     const seen = new Set<string>();
     const result: string[] = [];
 
@@ -228,7 +221,7 @@ export default function ExploreScreen() {
     }
 
     return result;
-  }, [categories, events]);
+  }, [categories, eventCategories, events]);
 
   const selectedCategoryId = useMemo(() => {
     if (selectedCategory === 'all') return null;
@@ -239,23 +232,29 @@ export default function ExploreScreen() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadCategories = async () => {
+    const loadCategoriesAndEventCategories = async () => {
       try {
-        const rows = await destinationService.getCategories();
+        const [destinationRows, eventCategoryRows] = await Promise.all([
+          destinationService.getCategories(),
+          eventService.getDistinctCategories(),
+        ]);
+
         if (cancelled) return;
 
-        const mapped: CategoryRow[] = (rows ?? [])
+        const mapped: CategoryRow[] = (destinationRows ?? [])
           .map((row: any) => ({ id: row.id, name: String(row.name ?? '').trim() }))
           .filter((row: CategoryRow) => !!row.name);
 
         setCategories(mapped);
+        setEventCategories((eventCategoryRows ?? []).map((item) => String(item).trim()).filter(Boolean));
       } catch {
         if (cancelled) return;
         setCategories([]);
+        setEventCategories([]);
       }
     };
 
-    void loadCategories();
+    void loadCategoriesAndEventCategories();
 
     return () => {
       cancelled = true;
@@ -359,14 +358,13 @@ export default function ExploreScreen() {
               setEvents([]);
               setDistanceByKey({});
             }
-            setErrorMessage('Nearby filter requires GPS or a manual target location.');
+            setErrorMessage(t('explore.error.nearbyRequiresLocation'));
             return;
           }
 
           const filteredAttractions = await Promise.all(
             destinationRows.map(async (row) => {
               const coords = await resolveEntityCoords(row);
-              if (!isWithinRadiusKm(effectiveTargetLocation, coords, 5)) return null;
               if (!coords) return null;
 
               const meters = getHaversineDistance(
@@ -375,6 +373,8 @@ export default function ExploreScreen() {
                 coords.latitude,
                 coords.longitude
               );
+
+              if (!Number.isFinite(meters) || meters >= NEARBY_RADIUS_METERS) return null;
 
               return {
                 row,
@@ -387,7 +387,6 @@ export default function ExploreScreen() {
           const filteredEvents = await Promise.all(
             eventRows.map(async (row) => {
               const coords = await resolveEntityCoords(row);
-              if (!isWithinRadiusKm(effectiveTargetLocation, coords, 5)) return null;
               if (!coords) return null;
 
               const meters = getHaversineDistance(
@@ -396,6 +395,8 @@ export default function ExploreScreen() {
                 coords.latitude,
                 coords.longitude
               );
+
+              if (!Number.isFinite(meters) || meters >= NEARBY_RADIUS_METERS) return null;
 
               return {
                 row,
@@ -434,7 +435,7 @@ export default function ExploreScreen() {
 
         hasLoadedInitialRef.current = true;
       } catch (err: any) {
-        const msg = err?.message ?? 'Unable to load discovery results.';
+        const msg = err?.message ?? t('explore.error.loadResults');
         setErrorMessage(msg);
       } finally {
         if (showSpinner) setLoading(false);
@@ -452,6 +453,7 @@ export default function ExploreScreen() {
       selectedCategory,
       selectedCategoryId,
       sortBy,
+      t,
     ]
   );
 
@@ -521,7 +523,7 @@ export default function ExploreScreen() {
     const text = manualInput.trim();
     if (!text) {
       addNotification({
-        message: 'Please enter a location to override GPS.',
+        message: t('explore.manualLocation.enterPrompt'),
         type: 'warning',
       });
       return;
@@ -532,7 +534,7 @@ export default function ExploreScreen() {
       const coords = await geocodeLocationText(text);
       if (!coords) {
         addNotification({
-          message: 'Could not resolve this location. Try a more specific address.',
+          message: t('explore.manualLocation.resolveFailed'),
           type: 'error',
         });
         return;
@@ -541,30 +543,30 @@ export default function ExploreScreen() {
       setManualLocation({ text, coords });
       setUseManualLocation(true);
       addNotification({
-        message: 'Manual target location updated.',
+        message: t('explore.manualLocation.updated'),
         type: 'success',
       });
     } finally {
       setResolvingManualLocation(false);
     }
-  }, [addNotification, manualInput, setManualLocation, setUseManualLocation]);
+  }, [addNotification, manualInput, setManualLocation, setUseManualLocation, t]);
 
   const useGpsLocation = useCallback(() => {
     setUseManualLocation(false);
     addNotification({
-      message: 'Switched to GPS location.',
+      message: t('explore.manualLocation.switchedToGps'),
       type: 'info',
     });
-  }, [addNotification, setUseManualLocation]);
+  }, [addNotification, setUseManualLocation, t]);
 
   const clearManual = useCallback(() => {
     clearManualLocation();
     setManualInput('');
     addNotification({
-      message: 'Manual location cleared.',
+      message: t('explore.manualLocation.cleared'),
       type: 'info',
     });
-  }, [addNotification, clearManualLocation]);
+  }, [addNotification, clearManualLocation, t]);
 
   const onCreateEvent = useCallback(
     async (form: EventFormData) => {
@@ -572,18 +574,18 @@ export default function ExploreScreen() {
       const end = combineLocalDateTime(form.endDate, form.endTime);
 
       if (!start || !end) {
-        Alert.alert('Dữ liệu thời gian chưa đúng', 'Vui lòng nhập đúng định dạng ngày giờ.');
+        Alert.alert(t('events.form.error.invalidDateTimeTitle'), t('events.form.error.invalidDateTimeMessage'));
         throw new Error('Invalid datetime format');
       }
 
       if (end <= start) {
-        Alert.alert('Dữ liệu thời gian chưa đúng', 'Thời gian kết thúc phải sau thời gian bắt đầu.');
+        Alert.alert(t('events.form.error.invalidDateTimeTitle'), t('events.form.error.endAfterStart'));
         throw new Error('end_time must be greater than start_time');
       }
 
       const price = Number(form.price || '0');
       if (Number.isNaN(price) || price < 0) {
-        Alert.alert('Giá không hợp lệ', 'Giá phải là số lớn hơn hoặc bằng 0.');
+        Alert.alert(t('events.form.error.invalidPriceTitle'), t('events.form.error.invalidPriceMessage'));
         throw new Error('Invalid price');
       }
 
@@ -601,7 +603,7 @@ export default function ExploreScreen() {
 
         setShowCreateModal(false);
         addNotification({
-          message: 'Event created successfully.',
+          message: t('events.form.createdSuccess'),
           type: 'success',
         });
         hasLoadedInitialRef.current = false;
@@ -616,22 +618,22 @@ export default function ExploreScreen() {
           eventOffset: 0,
         });
       } catch (err: any) {
-        const message = String(err?.message ?? 'Không thể tạo sự kiện.');
+        const message = String(err?.message ?? t('events.form.error.createFailedMessage'));
         const lower = message.toLowerCase();
 
         if (lower.includes('not authenticated')) {
-          Alert.alert('Cần đăng nhập', 'Vui lòng đăng nhập để tạo sự kiện.', [
-            { text: 'Hủy', style: 'cancel' },
-            { text: 'Đăng nhập', onPress: () => router.push('/login' as any) },
+          Alert.alert(t('common.loginRequiredTitle'), t('explore.auth.createEventLoginRequired'), [
+            { text: t('common.cancel'), style: 'cancel' },
+            { text: t('common.login'), onPress: () => router.push('/login' as any) },
           ]);
           throw err;
         }
 
-        Alert.alert('Không thể tạo sự kiện', message);
+        Alert.alert(t('events.form.error.createFailedTitle'), message);
         throw err;
       }
     },
-    [addNotification, loadDiscovery]
+    [addNotification, loadDiscovery, t]
   );
 
   const onOpenDestination = useCallback((row: DestinationDiscoveryRow) => {
@@ -676,8 +678,8 @@ export default function ExploreScreen() {
           <>
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, { color: colors.title }]}>Discover</Text>
-            <Text style={[styles.headerSubtitle, { color: colors.muted }]}>Attractions and events around you</Text>
+            <Text style={[styles.headerTitle, { color: colors.title }]}>{t('explore.title')}</Text>
+            <Text style={[styles.headerSubtitle, { color: colors.muted }]}>{t('explore.subtitle')}</Text>
           </View>
 
           <Pressable
@@ -686,12 +688,12 @@ export default function ExploreScreen() {
             accessibilityRole="button"
           >
             <Feather name="plus" size={16} color="#001018" />
-            <Text style={styles.createBtnText}>Event</Text>
+            <Text style={styles.createBtnText}>{t('explore.createEvent')}</Text>
           </Pressable>
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-          <Text style={[styles.label, { color: colors.title }]}>Search</Text>
+          <Text style={[styles.label, { color: colors.title }]}>{t('explore.search.label')}</Text>
           <View style={[styles.searchWrap, { backgroundColor: colors.inputBg, borderColor: colors.border }]}> 
             <Feather name="search" size={16} color={colors.muted} />
             <TextInput
@@ -700,7 +702,7 @@ export default function ExploreScreen() {
                 setSearchText(value);
                 setShowSuggestions(true);
               }}
-              placeholder="Search by attraction or event name"
+              placeholder={t('explore.search.placeholder')}
               placeholderTextColor={colors.muted}
               style={[styles.searchInput, { color: colors.text }]}
               autoCorrect={false}
@@ -742,23 +744,33 @@ export default function ExploreScreen() {
                     ) : null}
                   </View>
                   <Text style={[styles.suggestionTag, { color: colors.muted }]}>
-                    {item.type === 'destination' ? 'Attraction' : 'Event'}
+                    {item.type === 'destination' ? t('explore.suggestion.attraction') : t('explore.suggestion.event')}
                   </Text>
                 </Pressable>
               ))}
             </View>
           ) : null}
+
+          <View style={{ marginTop: 4 }}>
+            <View style={styles.chipRow}>
+              <FilterChip
+                selected={nearbyOnly}
+                label={t('explore.filter.nearbyChip')}
+                onPress={() => setNearbyOnly((prev) => !prev)}
+              />
+            </View>
+          </View>
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-          <Text style={[styles.label, { color: colors.title }]}>Target Location</Text>
+          <Text style={[styles.label, { color: colors.title }]}>{t('explore.targetLocation.title')}</Text>
 
           <View style={[styles.searchWrap, { backgroundColor: colors.inputBg, borderColor: colors.border }]}> 
             <Feather name="map-pin" size={16} color={colors.muted} />
             <TextInput
               value={manualInput}
               onChangeText={setManualInput}
-              placeholder="Manual location (e.g. District 1, Ho Chi Minh City)"
+              placeholder={t('explore.targetLocation.placeholder')}
               placeholderTextColor={colors.muted}
               style={[styles.searchInput, { color: colors.text }]}
               autoCorrect={false}
@@ -780,7 +792,7 @@ export default function ExploreScreen() {
               {resolvingManualLocation ? (
                 <ActivityIndicator color={ExploreEaseColors.primary} size="small" />
               ) : (
-                <Text style={[styles.outlineBtnText, { color: colors.text }]}>Set Manual</Text>
+                <Text style={[styles.outlineBtnText, { color: colors.text }]}>{t('explore.targetLocation.setManual')}</Text>
               )}
             </Pressable>
 
@@ -789,7 +801,7 @@ export default function ExploreScreen() {
               style={({ pressed }) => [styles.outlineBtn, { borderColor: colors.border }, pressed ? { opacity: 0.84 } : null]}
               accessibilityRole="button"
             >
-              <Text style={[styles.outlineBtnText, { color: colors.text }]}>Use GPS</Text>
+              <Text style={[styles.outlineBtnText, { color: colors.text }]}>{t('explore.targetLocation.useGps')}</Text>
             </Pressable>
 
             <Pressable
@@ -797,7 +809,7 @@ export default function ExploreScreen() {
               style={({ pressed }) => [styles.outlineBtn, { borderColor: colors.border }, pressed ? { opacity: 0.84 } : null]}
               accessibilityRole="button"
             >
-              <Text style={[styles.outlineBtnText, { color: colors.text }]}>Clear</Text>
+              <Text style={[styles.outlineBtnText, { color: colors.text }]}>{t('explore.targetLocation.clear')}</Text>
             </Pressable>
           </View>
 
@@ -805,8 +817,8 @@ export default function ExploreScreen() {
             <Feather name={isManualLocationEnabled ? 'crosshair' : 'navigation'} size={14} color={ExploreEaseColors.primary} />
             <Text style={[styles.targetInfoText, { color: colors.muted }]}>
               {isManualLocationEnabled
-                ? `Manual: ${manualLocationText || 'Not set'}`
-                : (gpsLocation ? 'Using current GPS location' : (isLoadingGps ? 'Detecting GPS location...' : 'GPS unavailable'))}
+                ? t('explore.targetLocation.manualLabel', { location: manualLocationText || t('explore.targetLocation.notSet') })
+                : (gpsLocation ? t('explore.targetLocation.usingGps') : (isLoadingGps ? t('explore.targetLocation.detectingGps') : t('explore.targetLocation.gpsUnavailable')))}
             </Text>
           </View>
 
@@ -817,97 +829,83 @@ export default function ExploreScreen() {
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
           <View style={styles.filterHeaderRow}>
-            <Text style={[styles.label, { color: colors.title }]}>Filters & Sorting</Text>
+            <Text style={[styles.label, { color: colors.title }]}>{t('explore.filter.title')}</Text>
             {isFiltered ? (
               <Pressable onPress={onResetFilters} accessibilityRole="button">
-                <Text style={[styles.resetText, { color: ExploreEaseColors.primary }]}>Reset</Text>
+                <Text style={[styles.resetText, { color: ExploreEaseColors.primary }]}>{t('common.reset')}</Text>
               </Pressable>
             ) : null}
           </View>
 
-          <FilterSection label="Category" color={colors.title}>
+          <FilterSection label={t('explore.filter.category')} color={colors.title}>
             {categoryOptions.map((value) => (
               <FilterChip
                 key={value}
                 selected={selectedCategory.toLowerCase() === value.toLowerCase()}
-                label={value === 'all' ? 'All' : value}
+                label={value === 'all' ? t('common.all') : value}
                 onPress={() => setSelectedCategory(value)}
               />
             ))}
           </FilterSection>
 
-          <FilterSection label="Rating" color={colors.title}>
-            <FilterChip selected={ratingFilter === null} label="All" onPress={() => setRatingFilter(null)} />
+          <FilterSection label={t('explore.filter.rating')} color={colors.title}>
+            <FilterChip selected={ratingFilter === null} label={t('common.all')} onPress={() => setRatingFilter(null)} />
             <FilterChip selected={ratingFilter === 4} label="4.0+" onPress={() => setRatingFilter(4)} />
             <FilterChip selected={ratingFilter === 4.5} label="4.5+" onPress={() => setRatingFilter(4.5)} />
           </FilterSection>
 
-          <FilterSection label="Price" color={colors.title}>
-            <FilterChip selected={priceFilter === 'all'} label="All" onPress={() => setPriceFilter('all')} />
-            <FilterChip selected={priceFilter === 'free'} label="Free" onPress={() => setPriceFilter('free')} />
-            <FilterChip selected={priceFilter === 'paid'} label="Paid" onPress={() => setPriceFilter('paid')} />
+          <FilterSection label={t('explore.filter.price')} color={colors.title}>
+            <FilterChip selected={priceFilter === 'all'} label={t('common.all')} onPress={() => setPriceFilter('all')} />
+            <FilterChip selected={priceFilter === 'free'} label={t('common.free')} onPress={() => setPriceFilter('free')} />
+            <FilterChip selected={priceFilter === 'paid'} label={t('common.paid')} onPress={() => setPriceFilter('paid')} />
           </FilterSection>
 
-          <FilterSection label="Event Date" color={colors.title}>
-            <FilterChip selected={eventDateFilter === 'all'} label="All" onPress={() => setEventDateFilter('all')} />
-            <FilterChip selected={eventDateFilter === 'today'} label="Today" onPress={() => setEventDateFilter('today')} />
+          <FilterSection label={t('explore.filter.eventDate')} color={colors.title}>
+            <FilterChip selected={eventDateFilter === 'all'} label={t('common.all')} onPress={() => setEventDateFilter('all')} />
+            <FilterChip selected={eventDateFilter === 'today'} label={t('explore.filter.today')} onPress={() => setEventDateFilter('today')} />
             <FilterChip
               selected={eventDateFilter === 'next-7-days'}
-              label="Next 7 Days"
+              label={t('explore.filter.next7Days')}
               onPress={() => setEventDateFilter('next-7-days')}
             />
             <FilterChip
               selected={eventDateFilter === 'this-month'}
-              label="This Month"
+              label={t('explore.filter.thisMonth')}
               onPress={() => setEventDateFilter('this-month')}
             />
           </FilterSection>
 
-          <FilterSection label="Event Status" color={colors.title}>
-            <FilterChip selected={eventStatusFilter === 'all'} label="All" onPress={() => setEventStatusFilter('all')} />
+          <FilterSection label={t('explore.filter.eventStatus')} color={colors.title}>
+            <FilterChip selected={eventStatusFilter === 'all'} label={t('common.all')} onPress={() => setEventStatusFilter('all')} />
             <FilterChip
               selected={eventStatusFilter === 'incoming'}
-              label="Incoming"
+              label={t('event.status.incoming')}
               onPress={() => setEventStatusFilter('incoming')}
             />
             <FilterChip
               selected={eventStatusFilter === 'ongoing'}
-              label="Ongoing"
+              label={t('event.status.ongoing')}
               onPress={() => setEventStatusFilter('ongoing')}
             />
             <FilterChip
               selected={eventStatusFilter === 'completed'}
-              label="Completed"
+              label={t('event.status.completed')}
               onPress={() => setEventStatusFilter('completed')}
             />
           </FilterSection>
 
-          <FilterSection label="Sort" color={colors.title}>
-            <FilterChip selected={sortBy === 'relevance'} label="Relevance" onPress={() => setSortBy('relevance')} />
-            <FilterChip selected={sortBy === 'top-rated'} label="Top-rated" onPress={() => setSortBy('top-rated')} />
-            <FilterChip selected={sortBy === 'a-z'} label="A-Z" onPress={() => setSortBy('a-z')} />
+          <FilterSection label={t('explore.filter.sort')} color={colors.title}>
+            <FilterChip selected={sortBy === 'relevance'} label={t('explore.sort.relevance')} onPress={() => setSortBy('relevance')} />
+            <FilterChip selected={sortBy === 'top-rated'} label={t('explore.sort.topRated')} onPress={() => setSortBy('top-rated')} />
+            <FilterChip selected={sortBy === 'a-z'} label={t('explore.sort.alphabetical')} onPress={() => setSortBy('a-z')} />
           </FilterSection>
 
-          <View style={styles.nearbyToggleRow}>
-            <Text style={[styles.nearbyText, { color: colors.title }]}>Nearby radius &lt; 5 km</Text>
-            <Pressable
-              onPress={() => setNearbyOnly((prev) => !prev)}
-              style={({ pressed }) => [
-                styles.toggleBtn,
-                nearbyOnly ? styles.toggleBtnOn : styles.toggleBtnOff,
-                pressed ? { opacity: 0.84 } : null,
-              ]}
-              accessibilityRole="button"
-            >
-              <Text style={styles.toggleBtnText}>{nearbyOnly ? 'ON' : 'OFF'}</Text>
-            </Pressable>
-          </View>
         </View>
 
         {loading ? (
           <View style={styles.stateWrap}>
             <ActivityIndicator color={ExploreEaseColors.primary} />
-            <Text style={[styles.stateText, { color: colors.muted }]}>Loading discovery results...</Text>
+            <Text style={[styles.stateText, { color: colors.muted }]}>{t('explore.loadingResults')}</Text>
           </View>
         ) : null}
 
@@ -915,7 +913,7 @@ export default function ExploreScreen() {
           <View style={styles.stateWrap}>
             <Text style={[styles.stateText, { color: '#ef4444' }]}>{errorMessage}</Text>
             <Pressable onPress={onRefresh} style={styles.retryBtn} accessibilityRole="button">
-              <Text style={styles.retryBtnText}>Retry</Text>
+              <Text style={styles.retryBtnText}>{t('common.retry')}</Text>
             </Pressable>
           </View>
         ) : null}
@@ -923,11 +921,11 @@ export default function ExploreScreen() {
         {!loading && !errorMessage ? (
           <>
             <View style={styles.sectionHead}>
-              <Text style={[styles.sectionTitle, { color: colors.title }]}>Attractions ({attractions.length})</Text>
+              <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('explore.attractions', { count: attractions.length })}</Text>
             </View>
 
             {attractions.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.muted }]}>No attractions matched your filters.</Text>
+              <Text style={[styles.emptyText, { color: colors.muted }]}>{t('explore.noAttractions')}</Text>
             ) : (
               attractions.map((item) => {
                 const key = `destination:${String(item.id)}`;
@@ -956,7 +954,7 @@ export default function ExploreScreen() {
                           <Text style={styles.resultTag}>{toCategoryName(item)}</Text>
                         </View>
                         <View style={[styles.resultImageBase, { backgroundColor: 'rgba(34, 211, 238, 0.18)' }]}>
-                          <Text style={{ color: '#001018', fontWeight: '900', fontSize: 11 }}>Attraction</Text>
+                          <Text style={{ color: '#001018', fontWeight: '900', fontSize: 11 }}>{t('explore.suggestion.attraction')}</Text>
                         </View>
                       </ImageBackground>
                     </View>
@@ -966,16 +964,20 @@ export default function ExploreScreen() {
                         {item.name}
                       </Text>
                       <Text style={[styles.resultMeta, { color: colors.muted }]} numberOfLines={1}>
-                        {item.location || 'Unknown location'}
+                        {item.location || t('common.unknownLocation')}
                       </Text>
                       <View style={styles.resultBottomRow}>
-                        <Text style={[styles.resultPrice, { color: ExploreEaseColors.primary }]}>{formatDestinationPrice(item.price)}</Text>
+                        <Text style={[styles.resultPrice, { color: ExploreEaseColors.primary }]}>{formatDestinationPriceText(item.price)}</Text>
                         <View style={styles.inlineMetaRow}>
                           {typeof item.rating === 'number' ? (
-                            <Text style={[styles.resultMeta, { color: colors.muted }]}>⭐ {item.rating.toFixed(1)}</Text>
+                            <Text style={[styles.resultMeta, { color: colors.muted }]}>
+                              {t('explore.meta.ratingWithStar', { rating: item.rating.toFixed(1) })}
+                            </Text>
                           ) : null}
                           {typeof distanceMeters === 'number' ? (
-                            <Text style={[styles.resultMeta, { color: colors.muted }]}>• {formatDistance(distanceMeters)}</Text>
+                            <Text style={[styles.resultMeta, { color: colors.muted }]}>
+                              {t('explore.meta.distanceWithBullet', { distance: formatDistance(distanceMeters) })}
+                            </Text>
                           ) : null}
                         </View>
                       </View>
@@ -986,14 +988,14 @@ export default function ExploreScreen() {
             )}
 
             <View style={styles.sectionHead}>
-              <Text style={[styles.sectionTitle, { color: colors.title }]}>Events ({events.length})</Text>
+              <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('explore.events', { count: events.length })}</Text>
               <Pressable onPress={() => setShowCreateModal(true)} accessibilityRole="button">
-                <Text style={{ color: ExploreEaseColors.primary, fontWeight: '800', fontSize: 12 }}>Create Event</Text>
+                <Text style={{ color: ExploreEaseColors.primary, fontWeight: '800', fontSize: 12 }}>{t('explore.createEvent')}</Text>
               </Pressable>
             </View>
 
             {events.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.muted }]}>No events matched your filters.</Text>
+              <Text style={[styles.emptyText, { color: colors.muted }]}>{t('explore.noEvents')}</Text>
             ) : (
               events.map((item) => {
                 const key = `event:${String(item.id)}`;
@@ -1013,10 +1015,10 @@ export default function ExploreScreen() {
                       >
                         <View style={styles.resultImageOverlay} />
                         <View style={styles.resultImageInner}>
-                          <Text style={styles.resultTag}>{item.category || 'Event'}</Text>
+                          <Text style={styles.resultTag}>{item.category || t('explore.suggestion.event')}</Text>
                         </View>
                         <View style={[styles.resultImageBase, { backgroundColor: 'rgba(34, 211, 238, 0.18)' }]}>
-                          <Text style={{ color: '#001018', fontWeight: '900', fontSize: 11 }}>Event</Text>
+                          <Text style={{ color: '#001018', fontWeight: '900', fontSize: 11 }}>{t('explore.suggestion.event')}</Text>
                         </View>
                       </ImageBackground>
                     </View>
@@ -1026,22 +1028,24 @@ export default function ExploreScreen() {
                         {item.title}
                       </Text>
                       <Text style={[styles.resultMeta, { color: colors.muted }]} numberOfLines={1}>
-                        {item.location || 'Unknown location'}
+                        {item.location || t('common.unknownLocation')}
                       </Text>
                       <Text style={[styles.resultMeta, { color: colors.muted }]} numberOfLines={1}>
-                        {formatDateTime(item.start_time)}
+                        {formatDateTimeText(item.start_time)}
                       </Text>
                       <View style={styles.resultBottomRow}>
-                        <Text style={[styles.resultPrice, { color: ExploreEaseColors.primary }]}>{formatEventPrice(item.price)}</Text>
+                        <Text style={[styles.resultPrice, { color: ExploreEaseColors.primary }]}>{formatEventPriceText(item.price)}</Text>
                         <View style={styles.inlineMetaRow}>
                           <Text style={[styles.resultMeta, { color: colors.muted }]}>
                             {getEventStatusLabel(item.status)}
                           </Text>
                           {typeof distanceMeters === 'number' ? (
-                            <Text style={[styles.resultMeta, { color: colors.muted }]}>• {formatDistance(distanceMeters)}</Text>
+                            <Text style={[styles.resultMeta, { color: colors.muted }]}>
+                              {t('explore.meta.distanceWithBullet', { distance: formatDistance(distanceMeters) })}
+                            </Text>
                           ) : null}
                           <Pressable onPress={() => onOpenEvent(item)} style={styles.viewBtn} accessibilityRole="button">
-                            <Text style={styles.viewBtnText}>View</Text>
+                            <Text style={styles.viewBtnText}>{t('common.view')}</Text>
                           </Pressable>
                         </View>
                       </View>
@@ -1054,12 +1058,12 @@ export default function ExploreScreen() {
             {loadingMore ? (
               <View style={{ paddingVertical: 12, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                 <ActivityIndicator color={ExploreEaseColors.primary} />
-                <Text style={[styles.resultMeta, { color: colors.muted }]}>Loading more results...</Text>
+                <Text style={[styles.resultMeta, { color: colors.muted }]}>{t('explore.loadingMore')}</Text>
               </View>
             ) : null}
 
             {!loadingMore && hasLoadedInitialRef.current && !hasMoreAttractions && !hasMoreEvents ? (
-              <Text style={[styles.emptyText, { color: colors.muted }]}>You reached the end of discovery results.</Text>
+              <Text style={[styles.emptyText, { color: colors.muted }]}>{t('explore.endOfResults')}</Text>
             ) : null}
           </>
         ) : null}
@@ -1281,35 +1285,6 @@ export default function ExploreScreen() {
         },
         chipTextIdle: {
           color: '#64748b',
-        },
-        nearbyToggleRow: {
-          marginTop: 4,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        },
-        nearbyText: {
-          fontSize: 13,
-          fontWeight: '800',
-        },
-        toggleBtn: {
-          minWidth: 58,
-          minHeight: 30,
-          borderRadius: 999,
-          alignItems: 'center',
-          justifyContent: 'center',
-          paddingHorizontal: 10,
-        },
-        toggleBtnOn: {
-          backgroundColor: ExploreEaseColors.primary,
-        },
-        toggleBtnOff: {
-          backgroundColor: 'rgba(148,163,184,0.28)',
-        },
-        toggleBtnText: {
-          color: '#001018',
-          fontSize: 11,
-          fontWeight: '900',
         },
         stateWrap: {
           alignItems: 'center',

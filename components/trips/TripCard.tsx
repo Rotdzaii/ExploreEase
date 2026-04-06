@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
@@ -42,6 +43,7 @@ export function TripCard({
   style,
 }: TripCardProps) {
   const { isDark } = useTheme();
+  const { t } = useI18n();
 
   const scale = useSharedValue(1);
 
@@ -111,7 +113,7 @@ export function TripCard({
         {/* Bottom row */}
         <View style={styles.bottomRow}>
           <View>
-            <Text style={styles.metaLabel}>Ngày khởi hành</Text>
+            <Text style={styles.metaLabel}>{t('trips.card.departureDate')}</Text>
             <View style={styles.metaRow}>
               <Feather name="calendar" size={14} color="#ffffff" />
               <Text style={styles.metaValue}>{startDate}</Text>
@@ -119,7 +121,7 @@ export function TripCard({
           </View>
 
           <View style={[styles.daysPill, { backgroundColor: badgeBg }]}>
-            <Text style={styles.daysText}>{daysCount} ngày</Text>
+            <Text style={styles.daysText}>{t('trips.card.days', { count: daysCount })}</Text>
           </View>
         </View>
 

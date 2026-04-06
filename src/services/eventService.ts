@@ -106,6 +106,32 @@ const withLiveStatus = (row: EventRow): EventRow => ({
 });
 
 export const eventService = {
+  async getDistinctCategories(limit: number = 100): Promise<string[]> {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 100;
+
+    const { data, error } = await supabase
+      .from('events')
+      .select('category')
+      .order('category', { ascending: true })
+      .limit(safeLimit);
+
+    if (error) throw error;
+
+    const seen = new Set<string>();
+    const categories: string[] = [];
+
+    for (const row of data ?? []) {
+      const raw = String((row as any)?.category ?? '').trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      categories.push(raw);
+    }
+
+    return categories;
+  },
+
   async getEventById(eventId: string): Promise<EventRow | null> {
     const id = eventId?.trim();
     if (!id) return null;

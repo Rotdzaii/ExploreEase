@@ -1,3 +1,4 @@
+import { useI18n } from '@/src/i18n/useI18n';
 import { getThemeVars } from '@/utils/themeVars';
 import { Feather } from '@expo/vector-icons';
 import React, { useCallback, useMemo } from 'react';
@@ -9,12 +10,12 @@ export type InterestItem = {
 };
 
 const DEFAULT_INTERESTS: InterestItem[] = [
-  { id: 'Food', label: 'Ẩm thực' },
-  { id: 'Culture', label: 'Văn hóa' },
-  { id: 'Shopping', label: 'Mua sắm' },
-  { id: 'Nature', label: 'Thiên nhiên' },
-  { id: 'Adventure', label: 'Phiêu lưu' },
-  { id: 'History', label: 'Lịch sử' },
+  { id: 'Food', label: 'Food' },
+  { id: 'Culture', label: 'Culture' },
+  { id: 'Shopping', label: 'Shopping' },
+  { id: 'Nature', label: 'Nature' },
+  { id: 'Adventure', label: 'Adventure' },
+  { id: 'History', label: 'History' },
 ];
 
 export function InterestSelection({
@@ -26,7 +27,20 @@ export function InterestSelection({
   onSelectionChange: (next: string[]) => void;
   interests?: InterestItem[];
 }) {
-  const data = interests ?? DEFAULT_INTERESTS;
+  const { t } = useI18n();
+  const data = useMemo(() => {
+    if (interests) return interests;
+
+    return DEFAULT_INTERESTS.map((item) => {
+      if (item.id === 'Food') return { ...item, label: t('profile.interests.food') };
+      if (item.id === 'Culture') return { ...item, label: t('profile.interests.culture') };
+      if (item.id === 'Shopping') return { ...item, label: t('profile.interests.shopping') };
+      if (item.id === 'Nature') return { ...item, label: t('profile.interests.nature') };
+      if (item.id === 'Adventure') return { ...item, label: t('profile.interests.adventure') };
+      if (item.id === 'History') return { ...item, label: t('profile.interests.history') };
+      return item;
+    });
+  }, [interests, t]);
   const { primary } = getThemeVars();
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
@@ -47,9 +61,9 @@ export function InterestSelection({
         </View>
       </View>
 
-      <Text className="text-3xl font-bold text-white mb-2 text-center">Chọn sở thích của bạn</Text>
+      <Text className="text-3xl font-bold text-white mb-2 text-center">{t('auth.interests.selectTitle')}</Text>
       <Text className="text-white/70 mb-6 text-center">
-        Chúng tôi sẽ cá nhân hoá gợi ý du lịch dựa trên những gì bạn yêu thích.
+        {t('auth.interests.selectSubtitle')}
       </Text>
 
       <FlatList

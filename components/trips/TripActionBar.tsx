@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { Feather } from '@expo/vector-icons';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -12,6 +13,7 @@ type TripActionBarProps = {
 
 export function TripActionBar({ onOptimizeRoute, onShare, optimized }: TripActionBarProps) {
   const { isDark } = useTheme();
+  const { t } = useI18n();
 
   const colors = useMemo(
     () => ({
@@ -37,8 +39,8 @@ export function TripActionBar({ onOptimizeRoute, onShare, optimized }: TripActio
       >
         <Feather name="shuffle" size={18} color={ExploreEaseColors.primary} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.btnTitle, { color: colors.text }]}>Tối ưu lộ trình</Text>
-          <Text style={[styles.btnDesc, { color: colors.sub }]}>{optimized ? 'Đang áp dụng' : 'Sắp xếp theo tọa độ'}</Text>
+          <Text style={[styles.btnTitle, { color: colors.text }]}>{t('trips.actions.optimizeTitle')}</Text>
+          <Text style={[styles.btnDesc, { color: colors.sub }]}>{optimized ? t('trips.actions.optimizeOn') : t('trips.actions.optimizeOff')}</Text>
         </View>
       </Pressable>
 
@@ -54,8 +56,8 @@ export function TripActionBar({ onOptimizeRoute, onShare, optimized }: TripActio
       >
         <Feather name="share-2" size={18} color={ExploreEaseColors.primary} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.btnTitle, { color: colors.text }]}>Chia sẻ kế hoạch</Text>
-          <Text style={[styles.btnDesc, { color: colors.sub }]}>Tạo QR và gửi mã</Text>
+          <Text style={[styles.btnTitle, { color: colors.text }]}>{t('trips.actions.shareTitle')}</Text>
+          <Text style={[styles.btnDesc, { color: colors.sub }]}>{t('trips.actions.shareSubtitle')}</Text>
         </View>
       </Pressable>
     </View>

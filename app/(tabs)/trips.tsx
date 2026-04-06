@@ -4,6 +4,7 @@ import { TripActionBar } from '@/components/trips/TripActionBar';
 import { TripCard } from '@/components/trips/TripCard';
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { itineraryService } from '@/src/services/itineraryService';
 import { reminderService } from '@/src/services/reminderService';
 import { supabase } from '@/src/services/supabase';
@@ -43,11 +44,9 @@ const parseDateOnly = (value: string | null | undefined): Date | null => {
   return new Date(year, month - 1, day);
 };
 
-const toVnShortDate = (d: Date | null): string => {
+const toShortDate = (d: Date | null, locale: string): string => {
   if (!d) return '';
-  const day = d.getDate();
-  const month = d.getMonth() + 1;
-  return `${day} Tháng ${month}`;
+  return d.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
 };
 
 const toDaysCount = (start: Date | null, end: Date | null): number => {
@@ -58,7 +57,7 @@ const toDaysCount = (start: Date | null, end: Date | null): number => {
   return Math.min(days, 60);
 };
 
-const mapTripRowToTrip = (row: TripRow): Trip => {
+const mapTripRowToTrip = (row: TripRow, locale: string): Trip => {
   const start = parseDateOnly(row.start_date ?? null);
   const end = parseDateOnly(row.end_date ?? null);
   const daysCount = toDaysCount(start, end);
@@ -67,8 +66,8 @@ const mapTripRowToTrip = (row: TripRow): Trip => {
     id: row.id,
     name: row.name,
     destination: row.destination ?? '',
-    startDate: toVnShortDate(start),
-    endDate: toVnShortDate(end),
+    startDate: toShortDate(start, locale),
+    endDate: toShortDate(end, locale),
     daysCount,
     cover: row.cover ?? FALLBACK_COVER,
   };
@@ -76,6 +75,8 @@ const mapTripRowToTrip = (row: TripRow): Trip => {
 
 export default function TripsScreen() {
   const { isDark } = useTheme();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'vi-VN';
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [selectedDay, setSelectedDay] = useState<number>(1);
   const [isShareOpen, setIsShareOpen] = useState(false);
@@ -103,15 +104,15 @@ export default function TripsScreen() {
 
     try {
       const rows = await itineraryService.getTripsForCurrentUser();
-      setTrips((rows ?? []).map(mapTripRowToTrip));
+      setTrips((rows ?? []).map((row) => mapTripRowToTrip(row, locale)));
     } catch (err: any) {
       console.warn('loadTrips failed:', err?.message ?? err);
       setTrips([]);
-      setTripsError('Không thể tải danh sách chuyến đi.');
+      setTripsError(t('trips.error.loadList'));
     } finally {
       setLoadingTrips(false);
     }
-  }, []);
+  }, [locale, t]);
 
   const ensureLoggedIn = useCallback(async (): Promise<boolean> => {
     try {
@@ -122,12 +123,12 @@ export default function TripsScreen() {
       console.warn('ensureLoggedIn (trips) failed:', err?.message ?? err);
     }
 
-    Alert.alert('Cần đăng nhập', 'Vui lòng đăng nhập để tạo chuyến đi.', [
-      { text: 'Hủy', style: 'cancel' },
-      { text: 'Đăng nhập', onPress: () => router.push('/login' as any) },
+    Alert.alert(t('common.loginRequiredTitle'), t('trips.auth.createLoginRequired'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.login'), onPress: () => router.push('/login' as any) },
     ]);
     return false;
-  }, []);
+  }, [t]);
 
   const createTrip = useCallback(async () => {
     if (creatingTrip) return;
@@ -139,7 +140,7 @@ export default function TripsScreen() {
     try {
       const todayIso = new Date().toISOString().slice(0, 10);
       const payload = {
-        title: 'Chuyến đi mới',
+        title: t('trips.newTripTitle'),
         destination: null,
         cover: null,
         start_date: todayIso,
@@ -150,18 +151,18 @@ export default function TripsScreen() {
       const newRow = await itineraryService.createTripForCurrentUser(payload);
       console.log('[TripsScreen] createTrip success:', newRow);
 
-      const newTrip = mapTripRowToTrip(newRow);
+      const newTrip = mapTripRowToTrip(newRow, locale);
       setTrips((prev) => [newTrip, ...(prev ?? [])]);
       router.push(`/itinerary/${newTrip.id}` as any);
       setTripsError(null);
     } catch (err: any) {
       console.log('[TripsScreen] createTrip error:', err);
       console.warn('createTrip (trips) failed:', err?.message ?? err);
-      Alert.alert('Không thể tạo chuyến đi', 'Vui lòng thử lại sau.');
+      Alert.alert(t('trips.error.createTitle'), t('trips.error.tryAgainLater'));
     } finally {
       setCreatingTrip(false);
     }
-  }, [creatingTrip, ensureLoggedIn]);
+  }, [creatingTrip, ensureLoggedIn, locale, t]);
 
   useFocusEffect(
     useCallback(() => {
@@ -225,9 +226,9 @@ export default function TripsScreen() {
       setNotes(next ?? []);
     } catch (err: any) {
       console.warn('addNote failed:', err?.message ?? err);
-      Alert.alert('Không thể lưu ghi chú', 'Vui lòng thử lại sau.');
+      Alert.alert(t('trips.notes.saveErrorTitle'), t('trips.error.tryAgainLater'));
     }
-  }, [noteDraft, selectedDay, selectedTrip]);
+  }, [noteDraft, selectedDay, selectedTrip, t]);
 
   const onPressReminder = useCallback(
     (item: any) => {
@@ -241,44 +242,44 @@ export default function TripsScreen() {
       tomorrow8.setHours(8, 0, 0, 0);
 
       Alert.alert(
-        'Đặt nhắc nhở',
-        `Chọn thời gian nhắc nhở cho “${item.name}”`,
+        t('trips.reminder.title'),
+        t('trips.reminder.pickTime', { name: item.name }),
         [
           {
-            text: '15 phút nữa',
+            text: t('trips.reminder.in15m'),
             onPress: () => {
               void reminderService.createReminder({
                 tripId: selectedTrip.id,
-                message: `Nhắc nhở: ${item.name} (Ngày ${selectedDay})`,
+                message: t('trips.reminder.message', { name: item.name, day: selectedDay }),
                 remindAt: remind15,
               });
             },
           },
           {
-            text: '1 giờ nữa',
+            text: t('trips.reminder.in1h'),
             onPress: () => {
               void reminderService.createReminder({
                 tripId: selectedTrip.id,
-                message: `Nhắc nhở: ${item.name} (Ngày ${selectedDay})`,
+                message: t('trips.reminder.message', { name: item.name, day: selectedDay }),
                 remindAt: remind60,
               });
             },
           },
           {
-            text: 'Ngày mai 08:00',
+            text: t('trips.reminder.tomorrow8'),
             onPress: () => {
               void reminderService.createReminder({
                 tripId: selectedTrip.id,
-                message: `Nhắc nhở: ${item.name} (Ngày ${selectedDay})`,
+                message: t('trips.reminder.message', { name: item.name, day: selectedDay }),
                 remindAt: tomorrow8,
               });
             },
           },
-          { text: 'Hủy', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
         ]
       );
     },
-    [selectedDay, selectedTrip]
+    [selectedDay, selectedTrip, t]
   );
 
   const toggleOptimize = useCallback(() => {
@@ -287,10 +288,10 @@ export default function TripsScreen() {
 
   const onPressAddDestination = useCallback(() => {
     Alert.alert(
-      'Thêm điểm đến',
-      'Chưa có màn hình thêm điểm đến. Hiện tại bạn có thể thêm bản ghi vào bảng itinerary_items trên Supabase (trip_id + day) để hiển thị ở đây.'
+      t('trips.destination.addTitle'),
+      t('trips.destination.addMessage')
     );
-  }, []);
+  }, [t]);
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
@@ -305,7 +306,7 @@ export default function TripsScreen() {
                 pressed ? { opacity: 0.85 } : null,
               ]}
               accessibilityRole="button"
-              accessibilityLabel="Quay lại danh sách kế hoạch"
+              accessibilityLabel={t('trips.a11y.backToList')}
             >
               <Feather name="chevron-left" size={24} color={colors.title} />
             </Pressable>
@@ -322,14 +323,18 @@ export default function TripsScreen() {
                 pressed ? { opacity: 0.85 } : null,
               ]}
               accessibilityRole="button"
-              accessibilityLabel="Chia sẻ kế hoạch"
+              accessibilityLabel={t('trips.a11y.shareTrip')}
             >
               <Feather name="share-2" size={20} color={colors.title} />
             </Pressable>
           </View>
 
           <Text style={[styles.detailSub, { color: colors.subtitle }]}>
-            {selectedTrip.startDate} - {selectedTrip.endDate} • {selectedTrip.daysCount} ngày
+            {t('trips.detail.dateRange', {
+              start: selectedTrip.startDate,
+              end: selectedTrip.endDate,
+              days: selectedTrip.daysCount,
+            })}
           </Text>
 
           <ScrollView
@@ -363,7 +368,7 @@ export default function TripsScreen() {
                         { color: active ? '#001018' : colors.subtitle },
                       ]}
                     >
-                      Ngày {d}
+                      {t('trips.dayLabel', { day: d })}
                     </Text>
                   </Pressable>
                 );
@@ -371,7 +376,7 @@ export default function TripsScreen() {
             </ScrollView>
 
             <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: colors.title }]}>Lịch trình Ngày {selectedDay}</Text>
+              <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('trips.timelineTitle', { day: selectedDay })}</Text>
               <DayTimeline
                 tripId={selectedTrip.id}
                 day={selectedDay}
@@ -382,13 +387,13 @@ export default function TripsScreen() {
             </View>
 
             <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: colors.title }]}>Ghi chú</Text>
+              <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('trips.notes.title')}</Text>
               <View style={[styles.notesCard, { borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15, 23, 42, 0.08)', backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#ffffff' }]}>
                 <View style={styles.noteInputRow}>
                   <TextInput
                     value={noteDraft}
                     onChangeText={setNoteDraft}
-                    placeholder="Nhập ghi chú cho ngày này..."
+                    placeholder={t('trips.notes.placeholder')}
                     placeholderTextColor={colors.subtitle}
                     style={[styles.noteInput, { color: colors.title }]}
                   />
@@ -407,7 +412,7 @@ export default function TripsScreen() {
                 </View>
 
                 {notes.length === 0 ? (
-                  <Text style={[styles.notesEmpty, { color: colors.subtitle }]}>Chưa có ghi chú nào.</Text>
+                  <Text style={[styles.notesEmpty, { color: colors.subtitle }]}>{t('trips.notes.empty')}</Text>
                 ) : (
                   <View style={styles.notesList}>
                     {notes.map((n, idx) => (
@@ -443,22 +448,22 @@ export default function TripsScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.container}>
-            <Text style={[styles.pageTitle, { color: colors.title }]}>Kế hoạch của tôi</Text>
+            <Text style={[styles.pageTitle, { color: colors.title }]}>{t('trips.title')}</Text>
             <Text style={[styles.pageSubtitle, { color: colors.subtitle }]}>
-              Quản lý và lên kế hoạch cho các chuyến đi của bạn
+              {t('trips.subtitle')}
             </Text>
           </View>
 
           <View style={styles.listWrap}>
             {loadingTrips ? (
               <View style={[styles.stateCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-                <Text style={[styles.stateTitle, { color: colors.title }]}>Đang tải chuyến đi...</Text>
-                <Text style={[styles.stateText, { color: colors.subtitle }]}>Vui lòng đợi một chút.</Text>
+                <Text style={[styles.stateTitle, { color: colors.title }]}>{t('trips.loadingTitle')}</Text>
+                <Text style={[styles.stateText, { color: colors.subtitle }]}>{t('trips.loadingSubtitle')}</Text>
               </View>
             ) : tripsError ? (
               <View style={[styles.stateCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
                 <Text style={[styles.stateTitle, { color: colors.title }]}>{tripsError}</Text>
-                <Text style={[styles.stateText, { color: colors.subtitle }]}>Kiểm tra mạng hoặc đăng nhập rồi thử lại.</Text>
+                <Text style={[styles.stateText, { color: colors.subtitle }]}>{t('trips.error.checkNetwork')}</Text>
                 <Pressable
                   onPress={() => void loadTrips()}
                   style={({ pressed, hovered }) => [
@@ -468,16 +473,16 @@ export default function TripsScreen() {
                     pressed ? { opacity: 0.85 } : null,
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel="Thử tải lại danh sách chuyến đi"
+                  accessibilityLabel={t('trips.a11y.retryLoadList')}
                 >
                   <Feather name="refresh-cw" size={16} color={ExploreEaseColors.primary} />
-                  <Text style={styles.retryText}>Thử lại</Text>
+                  <Text style={styles.retryText}>{t('common.retry')}</Text>
                 </Pressable>
               </View>
             ) : trips.length === 0 ? (
               <View style={[styles.stateCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-                <Text style={[styles.stateTitle, { color: colors.title }]}>Chưa có chuyến đi</Text>
-                <Text style={[styles.stateText, { color: colors.subtitle }]}>Tạo chuyến đi mới để bắt đầu lên kế hoạch.</Text>
+                <Text style={[styles.stateTitle, { color: colors.title }]}>{t('trips.empty.title')}</Text>
+                <Text style={[styles.stateText, { color: colors.subtitle }]}>{t('trips.empty.subtitle')}</Text>
 
                 <Pressable
                   onPress={() => void createTrip()}
@@ -499,14 +504,14 @@ export default function TripsScreen() {
                     pressed ? { opacity: 0.85 } : null,
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel="Tạo chuyến đi mới"
+                  accessibilityLabel={t('trips.a11y.createTrip')}
                 >
                   {creatingTrip ? (
                     <ActivityIndicator color="#001018" />
                   ) : (
                     <Feather name="plus" size={16} color="#001018" />
                   )}
-                  <Text style={{ color: '#001018', fontSize: 13, fontWeight: '900' }}>Tạo chuyến đi mới</Text>
+                  <Text style={{ color: '#001018', fontSize: 13, fontWeight: '900' }}>{t('trips.createNew')}</Text>
                 </Pressable>
               </View>
             ) : (

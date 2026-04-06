@@ -10,7 +10,7 @@
 
         [x] Forgot password and recovery via email trigger
 
-        [/] UI Logic: Login button disabled until fields are filled
+        [x] UI Logic: Login button disabled until fields are filled
 
         [x] Logout implementation
 
@@ -78,7 +78,7 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
         [x] Auto-categorized content: Đã map dữ liệu từ Supabase theo category_id.
 
     4.2 Search & Filter (Đã có UI, cần hoàn thiện logic filter giá/rating)
-        [/] Filters: category, rating, price, popularity, distance:
+        [x] Filters: category, rating, price, popularity, distance:
 
             Price/Rating: Đã có.
 

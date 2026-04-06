@@ -157,6 +157,18 @@ export const itineraryService = {
     return tripService.getTripsForCurrentUser();
   },
 
+  async countTripsForCurrentUser(): Promise<number> {
+    const userId = await ensureAuthenticatedUserId();
+
+    const { count, error } = await supabase
+      .from('trips')
+      .select('id', { head: true, count: 'exact' })
+      .eq('user_id', userId);
+
+    if (error) throw error;
+    return typeof count === 'number' ? count : 0;
+  },
+
   async createTripForCurrentUser(input: CreateTripInput): Promise<TripRow> {
     const title = input.title.trim();
     if (!title) throw new Error('Trip title is required');

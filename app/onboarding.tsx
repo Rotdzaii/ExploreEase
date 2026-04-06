@@ -1,4 +1,5 @@
 import { InterestSelection } from '@/components/InterestSelection';
+import { useI18n } from '@/src/i18n/useI18n';
 import { profileService } from '@/src/services/profileService';
 import { getThemeVars } from '@/utils/themeVars';
 import { Feather } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ import {
 } from 'react-native';
 
 export default function OnboardingScreen() {
+  const { t } = useI18n();
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const { primary, background } = getThemeVars();
@@ -68,7 +70,7 @@ export default function OnboardingScreen() {
       await profileService.updateInterests(selectedInterests);
       router.replace('/(tabs)');
     } catch (err: any) {
-      Alert.alert('Lỗi', err?.message ?? 'Không thể lưu sở thích');
+      Alert.alert(t('auth.profileSetup.errorTitle'), err?.message ?? t('auth.interests.errorSaveInterests'));
     } finally {
       setSaving(false);
     }
@@ -123,9 +125,9 @@ export default function OnboardingScreen() {
               <View className="p-2 rounded-xl bg-white/10 border border-white/10">
                 <Feather name="globe" size={18} color={primary} />
               </View>
-              <Text className="text-white text-lg font-bold">ExploreEase</Text>
+              <Text className="text-white text-lg font-bold">{t('common.appName')}</Text>
             </View>
-            <Text className="text-white/60 text-xs">Bước 1/1</Text>
+            <Text className="text-white/60 text-xs">{t('auth.onboarding.step')}</Text>
           </View>
         </BlurView>
 
@@ -148,7 +150,7 @@ export default function OnboardingScreen() {
                 style={{ backgroundColor: primary, opacity: saving ? 0.7 : 1 }}
                 accessibilityRole="button"
               >
-                <Text className="text-black font-semibold">Tiếp tục</Text>
+                <Text className="text-black font-semibold">{t('auth.profileSetup.continue')}</Text>
                 <Feather name="arrow-right" size={18} color="black" />
               </Pressable>
             </LinearGradient>

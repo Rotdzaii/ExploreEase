@@ -176,7 +176,8 @@ const toReviewImageUrls = (value: unknown): string[] => {
 
 export default function EventDetailScreen() {
   const { isDark } = useTheme();
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'vi-VN';
   const { formatPricePerPerson } = useCurrency();
   const { width: screenWidth } = useWindowDimensions();
   const params = useLocalSearchParams<{ id?: string }>();
@@ -293,6 +294,24 @@ export default function EventDetailScreen() {
   const reviewScale = useMemo(() => clamp(screenWidth / 390, 0.9, 1.15), [screenWidth]);
   const s = useCallback((value: number) => Math.round(value * reviewScale), [reviewScale]);
 
+  const formatEventDateTimeText = useCallback((value?: string | null) => {
+    if (!value) return t('common.na');
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleString(locale);
+  }, [locale, t]);
+
+  const formatEventPriceText = useCallback((value: number) => {
+    if (value <= 0) return t('common.free');
+    return formatPricePerPerson(value);
+  }, [formatPricePerPerson, t]);
+
+  const eventStatusText = useMemo(() => {
+    if (liveStatus === 'ongoing') return t('event.status.ongoing');
+    if (liveStatus === 'completed') return t('event.status.completed');
+    return t('event.status.incoming');
+  }, [liveStatus, t]);
+
   const promptLogin = useCallback((message: string) => {
     addNotification({
       message,
@@ -344,12 +363,12 @@ export default function EventDetailScreen() {
       console.warn('ensureLoggedIn (event) failed:', err?.message ?? err);
     }
 
-    Alert.alert('Cần đăng nhập', 'Vui lòng đăng nhập để thêm sự kiện vào kế hoạch.', [
-      { text: 'Hủy', style: 'cancel' },
-      { text: 'Đăng nhập', onPress: () => router.push('/login' as any) },
+    Alert.alert(t('common.loginRequiredTitle'), t('event.trip.auth.addToPlanLoginRequired'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.login'), onPress: () => router.push('/login' as any) },
     ]);
     return false;
-  }, []);
+  }, [t]);
 
   const openAddToTrip = useCallback(() => {
     setSelectedTripRow(null);
@@ -399,19 +418,19 @@ export default function EventDetailScreen() {
       });
 
       addNotification({
-        message: 'Đã thêm vào kế hoạch.',
+        message: t('event.trip.addedSuccess'),
         type: 'success',
         durationMs: 3000,
       });
       return true;
     } catch (err: any) {
       console.warn('addEventToTripDay failed:', err?.message ?? err);
-      Alert.alert('Không thể thêm vào kế hoạch', 'Vui lòng thử lại sau.');
+      Alert.alert(t('event.trip.error.addFailedTitle'), t('trips.error.tryAgainLater'));
       return false;
     } finally {
       setAddingToPlan(false);
     }
-  }, [addNotification, addingToPlan, event]);
+  }, [addNotification, addingToPlan, event, t]);
 
   const createTrip = useCallback(async () => {
     if (creatingTrip || !event) return;
@@ -423,7 +442,7 @@ export default function EventDetailScreen() {
     try {
       const todayIso = new Date().toISOString().slice(0, 10);
       const newTrip = await itineraryService.createTripForCurrentUser({
-        title: `Sự kiện: ${event.title}`,
+        title: t('event.trip.newTripTitle', { title: event.title }),
         destination: event.location ?? null,
         cover: event.image_url ?? null,
         start_date: todayIso,
@@ -435,11 +454,11 @@ export default function EventDetailScreen() {
       setSelectedTripDay(1);
     } catch (err: any) {
       console.warn('createTrip (event) failed:', err?.message ?? err);
-      Alert.alert('Không thể tạo chuyến đi', 'Vui lòng thử lại sau.');
+      Alert.alert(t('trips.error.createTitle'), t('trips.error.tryAgainLater'));
     } finally {
       setCreatingTrip(false);
     }
-  }, [creatingTrip, ensureLoggedIn, event]);
+  }, [creatingTrip, ensureLoggedIn, event, t]);
 
   const createTripAndAutoAdd = useCallback(async () => {
     if (creatingTripAndAdding || !event) return;
@@ -451,7 +470,7 @@ export default function EventDetailScreen() {
     try {
       const todayIso = new Date().toISOString().slice(0, 10);
       const newTrip = await itineraryService.createTripForCurrentUser({
-        title: `Sự kiện: ${event.title}`,
+        title: t('event.trip.newTripTitle', { title: event.title }),
         destination: event.location ?? null,
         cover: event.image_url ?? null,
         start_date: todayIso,
@@ -467,11 +486,11 @@ export default function EventDetailScreen() {
       setIsNoTripsModalOpen(false);
     } catch (err: any) {
       console.warn('createTripAndAutoAdd (event) failed:', err?.message ?? err);
-      Alert.alert('Không thể thêm vào kế hoạch', 'Vui lòng thử lại sau.');
+      Alert.alert(t('event.trip.error.addFailedTitle'), t('trips.error.tryAgainLater'));
     } finally {
       setCreatingTripAndAdding(false);
     }
-  }, [addEventToTripDay, creatingTripAndAdding, ensureLoggedIn, event]);
+  }, [addEventToTripDay, creatingTripAndAdding, ensureLoggedIn, event, t]);
 
   const addToTrip = useCallback(async () => {
     if (!selectedTripRow || savingToTrip) return;
@@ -627,7 +646,7 @@ export default function EventDetailScreen() {
 
   const fetchEvent = useCallback(async () => {
     if (!eventId) {
-      setErrorMessage('Thiếu event_id.');
+      setErrorMessage(t('event.detail.error.missingId'));
       setLoading(false);
       return;
     }
@@ -639,17 +658,17 @@ export default function EventDetailScreen() {
       const row = await eventService.getEventById(eventId);
       if (!row) {
         setEvent(null);
-        setErrorMessage('Không tìm thấy sự kiện.');
+        setErrorMessage(t('event.detail.notFound'));
         return;
       }
       setEvent(row);
     } catch (err: any) {
-      setErrorMessage(err?.message ?? 'Không thể tải chi tiết sự kiện.');
+      setErrorMessage(err?.message ?? t('event.detail.error.loadFailed'));
       setEvent(null);
     } finally {
       setLoading(false);
     }
-  }, [eventId]);
+  }, [eventId, t]);
 
   useEffect(() => {
     void fetchEvent();
@@ -1180,18 +1199,18 @@ export default function EventDetailScreen() {
       const end = combineLocalDateTime(formData.endDate, formData.endTime);
 
       if (!start || !end) {
-        Alert.alert('Dữ liệu thời gian chưa đúng', 'Vui lòng nhập đúng định dạng ngày giờ.');
+        Alert.alert(t('events.form.error.invalidDateTimeTitle'), t('events.form.error.invalidDateTimeMessage'));
         return;
       }
 
       if (end <= start) {
-        Alert.alert('Dữ liệu thời gian chưa đúng', 'Thời gian kết thúc phải sau thời gian bắt đầu.');
+        Alert.alert(t('events.form.error.invalidDateTimeTitle'), t('events.form.error.endAfterStart'));
         return;
       }
 
       const price = Number(formData.price || '0');
       if (Number.isNaN(price) || price < 0) {
-        Alert.alert('Giá không hợp lệ', 'Giá phải là số lớn hơn hoặc bằng 0.');
+        Alert.alert(t('events.form.error.invalidPriceTitle'), t('events.form.error.invalidPriceMessage'));
         return;
       }
 
@@ -1210,15 +1229,15 @@ export default function EventDetailScreen() {
         await fetchEvent();
         setShowEditModal(false);
         addNotification({
-          message: 'Cập nhật sự kiện thành công.',
+          message: t('events.form.updatedSuccess'),
           type: 'success',
           durationMs: 2800,
         });
       } catch (err: any) {
-        Alert.alert('Không thể cập nhật', err?.message ?? 'Đã có lỗi xảy ra khi cập nhật sự kiện.');
+        Alert.alert(t('events.form.error.updateFailedTitle'), err?.message ?? t('events.form.error.updateFailedMessage'));
       }
     },
-    [addNotification, event, fetchEvent]
+    [addNotification, event, fetchEvent, t]
   );
 
   const onDeleteEvent = useCallback(
@@ -1226,12 +1245,12 @@ export default function EventDetailScreen() {
       if (!event) return;
 
       Alert.alert(
-        'Xóa sự kiện',
-        'Bạn chắc chắn muốn xóa sự kiện này? Hành động này không thể hoàn tác.',
+        t('events.form.deleteConfirmTitle'),
+        t('events.form.deleteConfirmMessage'),
         [
-          { text: 'Hủy', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: 'Xóa',
+            text: t('events.form.deleteEvent'),
             style: 'destructive',
             onPress: () => {
               void (async () => {
@@ -1239,7 +1258,7 @@ export default function EventDetailScreen() {
                   await eventService.deleteEvent(id || event.id);
                   router.replace('/(tabs)/explore' as any);
                 } catch (err: any) {
-                  Alert.alert('Không thể xóa', err?.message ?? 'Đã có lỗi xảy ra khi xóa sự kiện.');
+                  Alert.alert(t('events.form.error.deleteFailedTitle'), err?.message ?? t('events.form.error.deleteFailedMessage'));
                 }
               })();
             },
@@ -1247,7 +1266,7 @@ export default function EventDetailScreen() {
         ]
       );
     },
-    [event]
+    [event, t]
   );
 
   if (loading) {
@@ -1256,7 +1275,7 @@ export default function EventDetailScreen() {
         <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.centerWrap}>
           <ActivityIndicator color={ExploreEaseColors.primary} />
-          <Text style={[styles.stateText, { color: colors.muted }]}>Đang tải chi tiết sự kiện...</Text>
+          <Text style={[styles.stateText, { color: colors.muted }]}>{t('event.detail.loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -1267,7 +1286,7 @@ export default function EventDetailScreen() {
       <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
         <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.centerWrap}>
-          <Text style={[styles.stateText, { color: '#ef4444' }]}>{errorMessage ?? 'Không tìm thấy sự kiện.'}</Text>
+          <Text style={[styles.stateText, { color: '#ef4444' }]}>{errorMessage ?? t('event.detail.notFound')}</Text>
 
           <View style={styles.actionRow}>
             <Pressable
@@ -1275,7 +1294,7 @@ export default function EventDetailScreen() {
               style={({ pressed }) => [styles.outlineBtn, { borderColor: colors.border }, pressed ? { opacity: 0.84 } : null]}
               accessibilityRole="button"
             >
-              <Text style={[styles.outlineBtnText, { color: colors.text }]}>Quay lại</Text>
+              <Text style={[styles.outlineBtnText, { color: colors.text }]}>{t('event.detail.back')}</Text>
             </Pressable>
 
             <Pressable
@@ -1283,7 +1302,7 @@ export default function EventDetailScreen() {
               style={({ pressed }) => [styles.solidBtn, pressed ? { opacity: 0.84 } : null]}
               accessibilityRole="button"
             >
-              <Text style={styles.solidBtnText}>Thử lại</Text>
+              <Text style={styles.solidBtnText}>{t('common.retry')}</Text>
             </Pressable>
           </View>
         </View>
@@ -1323,7 +1342,7 @@ export default function EventDetailScreen() {
                 accessibilityRole="button"
               >
                 <Feather name="edit-2" size={16} color="#ffffff" />
-                <Text style={styles.editBtnText}>Edit</Text>
+                <Text style={styles.editBtnText}>{t('events.form.editTitle')}</Text>
               </Pressable>
             ) : null}
 
@@ -1333,7 +1352,7 @@ export default function EventDetailScreen() {
                   <Text style={styles.categoryBadgeText}>{event.category}</Text>
                 </View>
                 <View style={styles.statusBadge}>
-                  <Text style={styles.statusBadgeText}>{statusLabel(liveStatus)}</Text>
+                  <Text style={styles.statusBadgeText}>{eventStatusText}</Text>
                 </View>
               </View>
 
@@ -1343,29 +1362,29 @@ export default function EventDetailScreen() {
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>Mô tả</Text>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('event.detail.descriptionTitle')}</Text>
           <Text style={[styles.sectionText, { color: colors.text }]}>
-            {event.description?.trim() ? event.description : 'Chưa có mô tả cho sự kiện này.'}
+            {event.description?.trim() ? event.description : t('event.detail.noDescription')}
           </Text>
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>Thông tin sự kiện</Text>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('event.detail.infoTitle')}</Text>
 
-          <InfoRow label="ID" value={event.id} color={colors} />
-          <InfoRow label="Category" value={event.category} color={colors} />
-          <InfoRow label="Location" value={event.location} color={colors} />
-          <InfoRow label="Start" value={formatDateTime(event.start_time)} color={colors} />
-          <InfoRow label="End" value={formatDateTime(event.end_time)} color={colors} />
-          <InfoRow label="Price" value={formatPrice(Number(event.price ?? 0))} color={colors} />
-          <InfoRow label="Status" value={statusLabel(liveStatus)} color={colors} />
-          <InfoRow label="Creator" value={event.creator_id} color={colors} />
-          <InfoRow label="Created at" value={formatDateTime(event.created_at)} color={colors} />
+          <InfoRow label={t('event.detail.info.id')} value={event.id} color={colors} />
+          <InfoRow label={t('event.detail.info.category')} value={event.category} color={colors} />
+          <InfoRow label={t('event.detail.info.location')} value={event.location} color={colors} />
+          <InfoRow label={t('event.detail.info.start')} value={formatEventDateTimeText(event.start_time)} color={colors} />
+          <InfoRow label={t('event.detail.info.end')} value={formatEventDateTimeText(event.end_time)} color={colors} />
+          <InfoRow label={t('event.detail.info.price')} value={formatEventPriceText(Number(event.price ?? 0))} color={colors} />
+          <InfoRow label={t('event.detail.info.status')} value={eventStatusText} color={colors} />
+          <InfoRow label={t('event.detail.info.creator')} value={event.creator_id} color={colors} />
+          <InfoRow label={t('event.detail.info.createdAt')} value={formatEventDateTimeText(event.created_at)} color={colors} />
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>Kế hoạch du lịch</Text>
-          <Text style={[styles.sectionText, { color: colors.text }]}>Thêm sự kiện này vào lịch trình theo từng ngày.</Text>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('event.detail.planTitle')}</Text>
+          <Text style={[styles.sectionText, { color: colors.text }]}>{t('event.detail.planSubtitle')}</Text>
 
           <Pressable
             onPress={() => void onPressAddToPlan()}
@@ -1376,38 +1395,38 @@ export default function EventDetailScreen() {
               pressed ? { opacity: 0.84 } : null,
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Thêm sự kiện vào kế hoạch"
+            accessibilityLabel={t('event.detail.planAddAction')}
           >
             {addingToPlan ? (
               <ActivityIndicator color="#001018" />
             ) : (
               <MaterialCommunityIcons name="playlist-plus" size={18} color="#001018" />
             )}
-            <Text style={styles.planButtonText}>{addingToPlan ? 'Đang thêm...' : 'Thêm vào kế hoạch'}</Text>
+            <Text style={styles.planButtonText}>{addingToPlan ? t('event.detail.planAdding') : t('event.detail.planAddAction')}</Text>
           </Pressable>
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>Đếm ngược sự kiện</Text>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('event.detail.countdownTitle')}</Text>
 
           {liveStatus === 'incoming' && countdownParts ? (
             <>
-              <Text style={[styles.sectionText, { color: colors.text }]}>Sự kiện sẽ bắt đầu sau:</Text>
+              <Text style={[styles.sectionText, { color: colors.text }]}>{t('event.detail.countdownStartsIn')}</Text>
               <View style={styles.countdownRow}>
-                <CountdownTile label="Ngày" value={String(countdownParts.days)} />
-                <CountdownTile label="Giờ" value={twoDigits(countdownParts.hours)} />
-                <CountdownTile label="Phút" value={twoDigits(countdownParts.minutes)} />
-                <CountdownTile label="Giây" value={twoDigits(countdownParts.seconds)} />
+                <CountdownTile label={t('event.detail.countdown.days')} value={String(countdownParts.days)} />
+                <CountdownTile label={t('event.detail.countdown.hours')} value={twoDigits(countdownParts.hours)} />
+                <CountdownTile label={t('event.detail.countdown.minutes')} value={twoDigits(countdownParts.minutes)} />
+                <CountdownTile label={t('event.detail.countdown.seconds')} value={twoDigits(countdownParts.seconds)} />
               </View>
             </>
           ) : null}
 
           {liveStatus === 'ongoing' ? (
-            <Text style={[styles.sectionText, { color: colors.text }]}>Sự kiện đang diễn ra.</Text>
+            <Text style={[styles.sectionText, { color: colors.text }]}>{t('event.detail.ongoing')}</Text>
           ) : null}
 
           {liveStatus === 'completed' ? (
-            <Text style={[styles.sectionText, { color: colors.text }]}>Sự kiện đã kết thúc.</Text>
+            <Text style={[styles.sectionText, { color: colors.text }]}>{t('event.detail.completed')}</Text>
           ) : null}
         </View>
 
@@ -1618,7 +1637,7 @@ export default function EventDetailScreen() {
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text style={{ fontSize: 16, fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>
-                Thêm vào kế hoạch
+                {t('event.detail.planAddAction')}
               </Text>
               <Pressable
                 onPress={closeTripPicker}
@@ -1637,7 +1656,7 @@ export default function EventDetailScreen() {
                   pressed ? { opacity: 0.85 } : null,
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel="Đóng"
+                accessibilityLabel={t('event.detail.close')}
               >
                 <MaterialCommunityIcons name="close" size={18} color={isDark ? '#ffffff' : '#0f172a'} />
               </Pressable>
@@ -1647,7 +1666,7 @@ export default function EventDetailScreen() {
               <View style={{ paddingTop: 2, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <ActivityIndicator color={ExploreEaseColors.primary} />
                 <Text style={{ fontWeight: '700', color: isDark ? 'rgba(148,163,184,0.95)' : 'rgba(15,23,42,0.55)' }}>
-                  Đang tải chuyến đi...
+                  {t('trips.loadingTitle')}
                 </Text>
               </View>
             ) : selectedTripRow ? (
@@ -1666,7 +1685,7 @@ export default function EventDetailScreen() {
                     {selectedTripRow.name}
                   </Text>
                   <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
-                    Chọn ngày để thêm sự kiện
+                    {t('event.detail.tripPicker.pickDay')}
                   </Text>
                 </View>
 
@@ -1692,7 +1711,7 @@ export default function EventDetailScreen() {
                         accessibilityRole="button"
                       >
                         <Text style={{ fontSize: 13, fontWeight: '800', color: active ? '#001018' : (isDark ? '#94a3b8' : '#64748b') }}>
-                          Ngày {d}
+                          {t('trips.dayLabel', { day: d })}
                         </Text>
                       </Pressable>
                     );
@@ -1720,7 +1739,7 @@ export default function EventDetailScreen() {
                     ]}
                     accessibilityRole="button"
                   >
-                    <Text style={{ fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>Đổi chuyến</Text>
+                    <Text style={{ fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>{t('event.detail.tripPicker.changeTrip')}</Text>
                   </Pressable>
 
                   <Pressable
@@ -1742,21 +1761,21 @@ export default function EventDetailScreen() {
                       pressed ? { opacity: 0.86 } : null,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel="Xác nhận thêm vào hành trình"
+                    accessibilityLabel={t('event.detail.tripPicker.confirm')}
                   >
                     {savingToTrip ? (
                       <ActivityIndicator color="#001018" />
                     ) : (
                       <MaterialCommunityIcons name="check" size={18} color="#001018" />
                     )}
-                    <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>Xác nhận</Text>
+                    <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>{t('event.detail.tripPicker.confirm')}</Text>
                   </Pressable>
                 </View>
               </View>
             ) : (
               <View style={{ gap: 10 }}>
                 <Text style={{ fontWeight: '800', color: isDark ? '#94a3b8' : '#64748b' }}>
-                  Chọn một chuyến đi
+                  {t('event.detail.tripPicker.pickTrip')}
                 </Text>
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 10 }}>
                   {trips.map((trip) => {
@@ -1788,7 +1807,7 @@ export default function EventDetailScreen() {
                           {trip.name}
                         </Text>
                         <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }} numberOfLines={2}>
-                          {(trip.destination ?? '').trim() ? `${trip.destination} • ` : ''}{daysCount} ngày
+                          {(trip.destination ?? '').trim() ? `${trip.destination} • ` : ''}{t('trips.card.days', { count: daysCount })}
                         </Text>
                       </Pressable>
                     );
@@ -1830,10 +1849,10 @@ export default function EventDetailScreen() {
             }}
           >
             <Text style={{ fontSize: 16, fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>
-              Chưa có chuyến đi
+              {t('event.detail.noTrips.title')}
             </Text>
             <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#94a3b8' : '#64748b', lineHeight: 18 }}>
-              Bạn cần tạo ít nhất một chuyến đi trước khi thêm sự kiện này.
+              {t('event.detail.noTrips.message')}
             </Text>
 
             <Pressable
@@ -1854,14 +1873,14 @@ export default function EventDetailScreen() {
                 pressed ? { opacity: 0.86 } : null,
               ]}
               accessibilityRole="button"
-              accessibilityLabel="Tạo ngay"
+              accessibilityLabel={t('event.detail.noTrips.createNow')}
             >
               {creatingTripAndAdding ? (
                 <ActivityIndicator color="#001018" />
               ) : (
                 <MaterialCommunityIcons name="plus" size={18} color="#001018" />
               )}
-              <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>Tạo ngay</Text>
+              <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>{t('event.detail.noTrips.createNow')}</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -1881,7 +1900,7 @@ export default function EventDetailScreen() {
           <View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 8, gap: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>
-                Thêm vào kế hoạch
+                {t('event.detail.planAddAction')}
               </Text>
 
               <Pressable
@@ -1901,7 +1920,7 @@ export default function EventDetailScreen() {
                   pressed ? { opacity: 0.85 } : null,
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel="Đóng"
+                accessibilityLabel={t('event.detail.close')}
               >
                 <MaterialCommunityIcons name="close" size={18} color={isDark ? '#ffffff' : '#0f172a'} />
               </Pressable>
@@ -1911,7 +1930,7 @@ export default function EventDetailScreen() {
               <View style={{ paddingTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <ActivityIndicator color={ExploreEaseColors.primary} />
                 <Text style={{ fontWeight: '700', color: isDark ? 'rgba(148,163,184,0.95)' : 'rgba(15,23,42,0.55)' }}>
-                  Đang tải chuyến đi...
+                  {t('trips.loadingTitle')}
                 </Text>
               </View>
             ) : trips.length === 0 ? (
@@ -1927,10 +1946,10 @@ export default function EventDetailScreen() {
                   }}
                 >
                   <Text style={{ fontWeight: '900', fontSize: 14, color: isDark ? '#ffffff' : '#0f172a' }}>
-                    Bạn chưa có chuyến đi nào
+                    {t('event.detail.noTrips.noneYet')}
                   </Text>
                   <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
-                    Tạo chuyến đi mới để thêm sự kiện vào hành trình.
+                    {t('event.detail.noTrips.createHint')}
                   </Text>
                 </View>
 
@@ -1952,7 +1971,7 @@ export default function EventDetailScreen() {
                     pressed ? { opacity: 0.86 } : null,
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel="Tạo chuyến đi mới"
+                  accessibilityLabel={t('trips.createNew')}
                 >
                   {creatingTrip ? (
                     <ActivityIndicator color="#001018" />
@@ -1960,7 +1979,7 @@ export default function EventDetailScreen() {
                     <MaterialCommunityIcons name="plus" size={18} color="#001018" />
                   )}
                   <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>
-                    Tạo chuyến đi mới
+                    {t('trips.createNew')}
                   </Text>
                 </Pressable>
               </View>
@@ -1980,7 +1999,7 @@ export default function EventDetailScreen() {
                     {selectedTripRow.name}
                   </Text>
                   <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
-                    Chọn ngày để thêm sự kiện
+                    {t('event.detail.tripPicker.pickDay')}
                   </Text>
                 </View>
 
@@ -2006,7 +2025,7 @@ export default function EventDetailScreen() {
                         accessibilityRole="button"
                       >
                         <Text style={{ fontSize: 13, fontWeight: '800', color: active ? '#001018' : (isDark ? '#94a3b8' : '#64748b') }}>
-                          Ngày {d}
+                          {t('trips.dayLabel', { day: d })}
                         </Text>
                       </Pressable>
                     );
@@ -2034,7 +2053,7 @@ export default function EventDetailScreen() {
                     ]}
                     accessibilityRole="button"
                   >
-                    <Text style={{ fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>Đổi chuyến</Text>
+                    <Text style={{ fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>{t('event.detail.tripPicker.changeTrip')}</Text>
                   </Pressable>
 
                   <Pressable
@@ -2056,21 +2075,21 @@ export default function EventDetailScreen() {
                       pressed ? { opacity: 0.86 } : null,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel="Xác nhận thêm vào hành trình"
+                    accessibilityLabel={t('event.detail.tripPicker.confirm')}
                   >
                     {savingToTrip ? (
                       <ActivityIndicator color="#001018" />
                     ) : (
                       <MaterialCommunityIcons name="check" size={18} color="#001018" />
                     )}
-                    <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>Xác nhận</Text>
+                    <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>{t('event.detail.tripPicker.confirm')}</Text>
                   </Pressable>
                 </View>
               </View>
             ) : (
               <View style={{ gap: 10 }}>
                 <Text style={{ fontWeight: '800', color: isDark ? '#94a3b8' : '#64748b' }}>
-                  Chọn một chuyến đi
+                  {t('event.detail.tripPicker.pickTrip')}
                 </Text>
 
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 10 }}>
@@ -2103,7 +2122,7 @@ export default function EventDetailScreen() {
                           {trip.name}
                         </Text>
                         <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }} numberOfLines={2}>
-                          {(trip.destination ?? '').trim() ? `${trip.destination} • ` : ''}{daysCount} ngày
+                          {(trip.destination ?? '').trim() ? `${trip.destination} • ` : ''}{t('trips.card.days', { count: daysCount })}
                         </Text>
                       </Pressable>
                     );

@@ -1,5 +1,6 @@
 import { useCurrency } from '@/src/context/currency';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { reminderService } from '@/src/services/reminderService';
 import { transcribeAudioUri } from '@/src/services/speechService';
 import { getStyles } from '@/src/styles/homeStyles';
@@ -74,6 +75,7 @@ export default function HomeScreen() {
   const { width: screenWidth } = useWindowDimensions();
   const [profile, setProfile] = useState<{ full_name: string | null; nationality?: string | null } | null>(null);
   const { isDark } = useTheme();
+  const { t } = useI18n();
   const { formatPricePerPerson } = useCurrency();
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [pendingRemindersCount, setPendingRemindersCount] = useState(0);
@@ -126,10 +128,10 @@ export default function HomeScreen() {
   const toSuggestionPrice = useCallback(
     (value: number | null) => {
       if (value === null) return '—';
-      if (value <= 0) return 'FREE';
+      if (value <= 0) return t('common.free');
       return formatPricePerPerson(value);
     },
-    [formatPricePerPerson]
+    [formatPricePerPerson, t]
   );
 
   const fetchProfile = useCallback(async () => {
@@ -240,8 +242,8 @@ export default function HomeScreen() {
       const permission = await Audio.requestPermissionsAsync();
       if (!permission.granted) {
         Alert.alert(
-          'Microphone Permission Required',
-          'Please allow microphone access to use voice search.'
+          t('home.voice.permissionTitle'),
+          t('home.voice.permissionMessage')
         );
         return;
       }
@@ -261,9 +263,9 @@ export default function HomeScreen() {
       setRecordingAudioMode(false).catch(() => {
         // noop
       });
-      Alert.alert('Voice Search Unavailable', 'Could not start recording. Please try again.');
+      Alert.alert(t('home.voice.unavailableTitle'), t('home.voice.unavailableMessage'));
     }
-  }, [setRecordingAudioMode, voiceSearchState]);
+  }, [setRecordingAudioMode, t, voiceSearchState]);
 
   const stopVoiceRecordingAndTranscribe = useCallback(async () => {
     const recording = recordingRef.current;
@@ -290,7 +292,7 @@ export default function HomeScreen() {
 
     if (!recordingUri) {
       setVoiceSearchState('idle');
-      Alert.alert('Voice Search Failed', 'No audio file was captured. Please try again.');
+      Alert.alert(t('home.voice.failedTitle'), t('home.voice.noAudioMessage'));
       return;
     }
 
@@ -303,7 +305,7 @@ export default function HomeScreen() {
 
       const query = transcript.trim();
       if (!query) {
-        Alert.alert('No Speech Detected', 'Please speak clearly and try again.');
+        Alert.alert(t('home.voice.noSpeechTitle'), t('home.voice.noSpeechMessage'));
         return;
       }
 
@@ -312,13 +314,13 @@ export default function HomeScreen() {
     } catch (err: any) {
       console.warn('voice transcription failed:', err?.message ?? err);
       Alert.alert(
-        'Voice Search Failed',
-        err?.message ?? 'Unable to transcribe audio. Please check your API key and try again.'
+        t('home.voice.failedTitle'),
+        err?.message ?? t('home.voice.failedMessage')
       );
     } finally {
       setVoiceSearchState('idle');
     }
-  }, [handleSearch, setRecordingAudioMode]);
+  }, [handleSearch, setRecordingAudioMode, t]);
 
   const onPressVoiceSearch = useCallback(() => {
     if (voiceSearchState === 'processing') return;
@@ -333,15 +335,15 @@ export default function HomeScreen() {
 
   const voiceStatusText = useMemo(() => {
     if (voiceSearchState === 'recording') {
-      return 'Listening... tap the microphone again to stop.';
+      return t('home.voice.listening');
     }
 
     if (voiceSearchState === 'processing') {
-      return 'Transcribing your voice...';
+      return t('home.voice.processing');
     }
 
     return null;
-  }, [voiceSearchState]);
+  }, [t, voiceSearchState]);
 
   const fetchUnreadNotifications = useCallback(async (userId: string) => {
     try {
@@ -590,7 +592,7 @@ export default function HomeScreen() {
     return () => animation.stop();
   }, [pulse]);
 
-  const displayName = profile?.full_name ?? (loadingProfile ? '...' : '');
+  const displayName = profile?.full_name ?? (loadingProfile ? '...' : t('profile.defaultName'));
   const avatarUrl = displayName
     ? `https://api.dicebear.com/7.x/avataaars/jpg?seed=${encodeURIComponent(displayName)}`
     : undefined;

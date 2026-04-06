@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import {
     adminService,
     type AdminEventRow,
@@ -22,24 +23,31 @@ import {
 
 type AdminTab = 'events' | 'moderation';
 
-const formatDateTime = (value: string | null | undefined) => {
-  if (!value) return 'N/A';
+const formatDateTime = (
+  value: string | null | undefined,
+  locale: string,
+  t: (key: string, params?: Record<string, string | number>) => string
+) => {
+  if (!value) return t('common.na');
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString('vi-VN');
+  return d.toLocaleString(locale);
 };
 
-const toStatusLabel = (status: string | null | undefined) => {
+const toStatusLabel = (
+  status: string | null | undefined,
+  t: (key: string, params?: Record<string, string | number>) => string
+) => {
   const normalized = String(status ?? '').trim().toLowerCase();
 
-  if (normalized === 'pending') return 'Pending';
-  if (normalized === 'approved') return 'Approved';
-  if (normalized === 'rejected') return 'Rejected';
-  if (normalized === 'incoming') return 'Incoming';
-  if (normalized === 'ongoing') return 'Ongoing';
-  if (normalized === 'completed') return 'Completed';
+  if (normalized === 'pending') return t('admin.status.pending');
+  if (normalized === 'approved') return t('admin.status.approved');
+  if (normalized === 'rejected') return t('admin.status.rejected');
+  if (normalized === 'incoming') return t('event.status.incoming');
+  if (normalized === 'ongoing') return t('event.status.ongoing');
+  if (normalized === 'completed') return t('event.status.completed');
 
-  return normalized ? normalized : 'Unknown';
+  return normalized ? normalized : t('admin.status.unknown');
 };
 
 const toStatusColor = (status: string | null | undefined) => {
@@ -70,6 +78,8 @@ const toStatusColor = (status: string | null | undefined) => {
 
 export default function AdminDashboardScreen() {
   const { isDark } = useTheme();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'vi-VN';
   const addNotification = useNotificationStore((s) => s.addNotification);
 
   const [activeTab, setActiveTab] = useState<AdminTab>('events');
@@ -128,12 +138,12 @@ export default function AdminDashboardScreen() {
       const rows = await adminService.getEventsForApproval();
       setEvents(rows);
     } catch (error: any) {
-      const reason = String(error?.message ?? 'Unable to load events');
+      const reason = String(error?.message ?? t('admin.error.loadEvents'));
       notifyError(reason);
     } finally {
       setLoadingEvents(false);
     }
-  }, [hasAccess, notifyError]);
+  }, [hasAccess, notifyError, t]);
 
   const loadReports = useCallback(async () => {
     if (!hasAccess) return;
@@ -143,12 +153,12 @@ export default function AdminDashboardScreen() {
       const rows = await adminService.getPendingReviewReports();
       setReports(rows);
     } catch (error: any) {
-      const reason = String(error?.message ?? 'Unable to load pending reports');
+      const reason = String(error?.message ?? t('admin.error.loadReports'));
       notifyError(reason);
     } finally {
       setLoadingReports(false);
     }
-  }, [hasAccess, notifyError]);
+  }, [hasAccess, notifyError, t]);
 
   useEffect(() => {
     let alive = true;
@@ -197,15 +207,15 @@ export default function AdminDashboardScreen() {
       try {
         const updated = await adminService.updateEventApprovalStatus(eventId, 'approved');
         setEvents((prev) => prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)));
-        notifySuccess('Event approved');
+        notifySuccess(t('admin.success.eventApproved'));
       } catch (error: any) {
-        const reason = String(error?.message ?? 'Unable to approve event');
+        const reason = String(error?.message ?? t('admin.error.approveEvent'));
         notifyError(reason);
       } finally {
         setActingOnEventId(null);
       }
     },
-    [actingOnEventId, notifyError, notifySuccess]
+    [actingOnEventId, notifyError, notifySuccess, t]
   );
 
   const onRejectEvent = useCallback(
@@ -216,15 +226,15 @@ export default function AdminDashboardScreen() {
       try {
         const updated = await adminService.updateEventApprovalStatus(eventId, 'rejected');
         setEvents((prev) => prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)));
-        notifySuccess('Event rejected');
+        notifySuccess(t('admin.success.eventRejected'));
       } catch (error: any) {
-        const reason = String(error?.message ?? 'Unable to reject event');
+        const reason = String(error?.message ?? t('admin.error.rejectEvent'));
         notifyError(reason);
       } finally {
         setActingOnEventId(null);
       }
     },
-    [actingOnEventId, notifyError, notifySuccess]
+    [actingOnEventId, notifyError, notifySuccess, t]
   );
 
   const onDismissReport = useCallback(
@@ -235,15 +245,15 @@ export default function AdminDashboardScreen() {
       try {
         await adminService.dismissReviewReport(reportId);
         setReports((prev) => prev.filter((row) => row.id !== reportId));
-        notifySuccess('Report dismissed');
+        notifySuccess(t('admin.success.reportDismissed'));
       } catch (error: any) {
-        const reason = String(error?.message ?? 'Unable to dismiss report');
+        const reason = String(error?.message ?? t('admin.error.dismissReport'));
         notifyError(reason);
       } finally {
         setActingOnReportId(null);
       }
     },
-    [actingOnReportId, notifyError, notifySuccess]
+    [actingOnReportId, notifyError, notifySuccess, t]
   );
 
   const onDeleteReview = useCallback(
@@ -251,7 +261,7 @@ export default function AdminDashboardScreen() {
       if (actingOnReportId) return;
 
       if (!report.review) {
-        notifyError('Review data is missing for this report');
+        notifyError(t('admin.error.reviewDataMissing'));
         return;
       }
 
@@ -259,15 +269,15 @@ export default function AdminDashboardScreen() {
       try {
         await adminService.deleteReviewAndResolveReport(report.id, report.review_id);
         setReports((prev) => prev.filter((row) => row.review_id !== report.review_id));
-        notifySuccess('Review deleted and report resolved');
+        notifySuccess(t('admin.success.reviewDeleted'));
       } catch (error: any) {
-        const reason = String(error?.message ?? 'Unable to delete review');
+        const reason = String(error?.message ?? t('admin.error.deleteReview'));
         notifyError(reason);
       } finally {
         setActingOnReportId(null);
       }
     },
-    [actingOnReportId, notifyError, notifySuccess]
+    [actingOnReportId, notifyError, notifySuccess, t]
   );
 
   if (checkingAccess) {
@@ -276,7 +286,7 @@ export default function AdminDashboardScreen() {
         <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.stateWrap}>
           <ActivityIndicator color={ExploreEaseColors.primary} />
-          <Text style={[styles.stateText, { color: colors.muted }]}>Checking admin access...</Text>
+          <Text style={[styles.stateText, { color: colors.muted }]}>{t('admin.accessChecking')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -293,8 +303,8 @@ export default function AdminDashboardScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.pageTitle, { color: colors.title }]}>Admin Dashboard</Text>
-            <Text style={[styles.pageSubtitle, { color: colors.muted }]}>Manage event approvals and moderation reports</Text>
+            <Text style={[styles.pageTitle, { color: colors.title }]}>{t('admin.title')}</Text>
+            <Text style={[styles.pageSubtitle, { color: colors.muted }]}>{t('admin.subtitle')}</Text>
           </View>
 
           <Pressable
@@ -326,7 +336,7 @@ export default function AdminDashboardScreen() {
             ]}
             accessibilityRole="button"
           >
-            <Text style={[styles.tabText, { color: activeTab === 'events' ? '#001018' : colors.text }]}>Event Approval</Text>
+            <Text style={[styles.tabText, { color: activeTab === 'events' ? '#001018' : colors.text }]}>{t('admin.tabs.eventApproval')}</Text>
           </Pressable>
 
           <Pressable
@@ -341,14 +351,14 @@ export default function AdminDashboardScreen() {
             ]}
             accessibilityRole="button"
           >
-            <Text style={[styles.tabText, { color: activeTab === 'moderation' ? '#001018' : colors.text }]}>Moderation</Text>
+            <Text style={[styles.tabText, { color: activeTab === 'moderation' ? '#001018' : colors.text }]}>{t('admin.tabs.moderation')}</Text>
           </Pressable>
         </View>
 
         {activeTab === 'events' ? (
           <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.sectionTitle, { color: colors.title }]}>User Events</Text>
+              <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('admin.events.sectionTitle')}</Text>
               <Pressable
                 onPress={() => void loadEvents()}
                 disabled={loadingEvents}
@@ -363,20 +373,20 @@ export default function AdminDashboardScreen() {
                 accessibilityRole="button"
               >
                 <Feather name="refresh-cw" size={14} color={colors.text} />
-                <Text style={[styles.refreshText, { color: colors.text }]}>Refresh</Text>
+                <Text style={[styles.refreshText, { color: colors.text }]}>{t('admin.refresh')}</Text>
               </Pressable>
             </View>
 
             {loadingEvents && events.length === 0 ? (
               <View style={styles.stateWrapInner}>
                 <ActivityIndicator color={ExploreEaseColors.primary} />
-                <Text style={[styles.stateText, { color: colors.muted }]}>Loading events...</Text>
+                <Text style={[styles.stateText, { color: colors.muted }]}>{t('admin.events.loading')}</Text>
               </View>
             ) : null}
 
             {!loadingEvents && events.length === 0 ? (
               <View style={styles.stateWrapInner}>
-                <Text style={[styles.stateText, { color: colors.muted }]}>No events found</Text>
+                <Text style={[styles.stateText, { color: colors.muted }]}>{t('admin.events.empty')}</Text>
               </View>
             ) : null}
 
@@ -387,7 +397,7 @@ export default function AdminDashboardScreen() {
                 <View key={event.id} style={[styles.itemCard, { borderColor: colors.border, backgroundColor: colors.tabIdle }]}>
                   <View style={styles.itemHeaderRow}>
                     <Text style={[styles.itemTitle, { color: colors.title }]} numberOfLines={2}>
-                      {event.title || 'Untitled event'}
+                      {event.title || t('admin.events.untitled')}
                     </Text>
                     <View
                       style={[
@@ -398,18 +408,21 @@ export default function AdminDashboardScreen() {
                         },
                       ]}
                     >
-                      <Text style={[styles.statusText, { color: statusStyle.text }]}>{toStatusLabel(String(event.status))}</Text>
+                      <Text style={[styles.statusText, { color: statusStyle.text }]}>{toStatusLabel(String(event.status), t)}</Text>
                     </View>
                   </View>
 
                   <Text style={[styles.itemMetaText, { color: colors.muted }]} numberOfLines={1}>
-                    Creator: {event.creator_name?.trim() || event.creator_id}
+                    {t('admin.events.creatorLabel', { creator: event.creator_name?.trim() || event.creator_id })}
                   </Text>
                   <Text style={[styles.itemMetaText, { color: colors.muted }]} numberOfLines={1}>
-                    Created: {formatDateTime(event.created_at ?? null)}
+                    {t('admin.events.createdLabel', { value: formatDateTime(event.created_at ?? null, locale, t) })}
                   </Text>
                   <Text style={[styles.itemMetaText, { color: colors.muted }]} numberOfLines={1}>
-                    Time: {formatDateTime(event.start_time)} - {formatDateTime(event.end_time)}
+                    {t('admin.events.timeLabel', {
+                      start: formatDateTime(event.start_time, locale, t),
+                      end: formatDateTime(event.end_time, locale, t),
+                    })}
                   </Text>
 
                   <View style={styles.actionRow}>
@@ -423,15 +436,15 @@ export default function AdminDashboardScreen() {
                       ]}
                       accessibilityRole="button"
                     >
-                      <Text style={styles.approveBtnText}>Approve</Text>
+                      <Text style={styles.approveBtnText}>{t('admin.actions.approve')}</Text>
                     </Pressable>
 
                     <Pressable
                       onPress={() => {
-                        Alert.alert('Reject event', 'Do you want to reject this event?', [
-                          { text: 'Cancel', style: 'cancel' },
+                        Alert.alert(t('admin.alert.rejectEventTitle'), t('admin.alert.rejectEventMessage'), [
+                          { text: t('common.cancel'), style: 'cancel' },
                           {
-                            text: 'Reject',
+                            text: t('admin.actions.reject'),
                             style: 'destructive',
                             onPress: () => {
                               void onRejectEvent(event.id);
@@ -447,7 +460,7 @@ export default function AdminDashboardScreen() {
                       ]}
                       accessibilityRole="button"
                     >
-                      <Text style={styles.rejectBtnText}>Reject</Text>
+                      <Text style={styles.rejectBtnText}>{t('admin.actions.reject')}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -459,7 +472,7 @@ export default function AdminDashboardScreen() {
         {activeTab === 'moderation' ? (
           <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.sectionTitle, { color: colors.title }]}>Pending Review Reports</Text>
+              <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('admin.reports.sectionTitle')}</Text>
               <Pressable
                 onPress={() => void loadReports()}
                 disabled={loadingReports}
@@ -474,20 +487,20 @@ export default function AdminDashboardScreen() {
                 accessibilityRole="button"
               >
                 <Feather name="refresh-cw" size={14} color={colors.text} />
-                <Text style={[styles.refreshText, { color: colors.text }]}>Refresh</Text>
+                <Text style={[styles.refreshText, { color: colors.text }]}>{t('admin.refresh')}</Text>
               </Pressable>
             </View>
 
             {loadingReports && reports.length === 0 ? (
               <View style={styles.stateWrapInner}>
                 <ActivityIndicator color={ExploreEaseColors.primary} />
-                <Text style={[styles.stateText, { color: colors.muted }]}>Loading reports...</Text>
+                <Text style={[styles.stateText, { color: colors.muted }]}>{t('admin.reports.loading')}</Text>
               </View>
             ) : null}
 
             {!loadingReports && reports.length === 0 ? (
               <View style={styles.stateWrapInner}>
-                <Text style={[styles.stateText, { color: colors.muted }]}>No pending reports</Text>
+                <Text style={[styles.stateText, { color: colors.muted }]}>{t('admin.reports.empty')}</Text>
               </View>
             ) : null}
 
@@ -495,26 +508,26 @@ export default function AdminDashboardScreen() {
               <View key={report.id} style={[styles.itemCard, { borderColor: colors.border, backgroundColor: colors.tabIdle }]}>
                 <View style={styles.itemHeaderRow}>
                   <Text style={[styles.itemTitle, { color: colors.title }]} numberOfLines={1}>
-                    Report #{report.id.slice(0, 8)}
+                    {t('admin.reports.reportId', { id: report.id.slice(0, 8) })}
                   </Text>
-                  <Text style={[styles.reportDateText, { color: colors.muted }]}>{formatDateTime(report.created_at)}</Text>
+                  <Text style={[styles.reportDateText, { color: colors.muted }]}>{formatDateTime(report.created_at, locale, t)}</Text>
                 </View>
 
                 <Text style={[styles.reportReasonText, { color: colors.text }]}>{report.reason}</Text>
                 <Text style={[styles.itemMetaText, { color: colors.muted }]} numberOfLines={1}>
-                  Reporter: {report.reporter_name?.trim() || report.reporter_id}
+                  {t('admin.reports.reporterLabel', { reporter: report.reporter_name?.trim() || report.reporter_id })}
                 </Text>
 
                 <View style={[styles.flaggedReviewWrap, { borderColor: colors.border }]}>
-                  <Text style={[styles.flaggedReviewTitle, { color: colors.title }]}>Flagged review</Text>
+                  <Text style={[styles.flaggedReviewTitle, { color: colors.title }]}>{t('admin.reports.flaggedReview')}</Text>
                   {report.review ? (
                     <>
-                      <Text style={[styles.itemMetaText, { color: colors.muted }]}>Rating: {report.review.rating}/5</Text>
-                      <Text style={[styles.itemMetaText, { color: colors.muted }]}>Author: {report.review.reviewer_name?.trim() || report.review.user_id}</Text>
-                      <Text style={[styles.reportReasonText, { color: colors.text }]}>Comment: {report.review.comment || '(No comment)'}</Text>
+                      <Text style={[styles.itemMetaText, { color: colors.muted }]}>{t('admin.reports.ratingLabel', { rating: report.review.rating })}</Text>
+                      <Text style={[styles.itemMetaText, { color: colors.muted }]}>{t('admin.reports.authorLabel', { author: report.review.reviewer_name?.trim() || report.review.user_id })}</Text>
+                      <Text style={[styles.reportReasonText, { color: colors.text }]}>{t('admin.reports.commentLabel', { comment: report.review.comment || t('review.card.noComment') })}</Text>
                     </>
                   ) : (
-                    <Text style={[styles.itemMetaText, { color: colors.muted }]}>Review record no longer exists</Text>
+                    <Text style={[styles.itemMetaText, { color: colors.muted }]}>{t('admin.reports.reviewMissing')}</Text>
                   )}
                 </View>
 
@@ -529,20 +542,20 @@ export default function AdminDashboardScreen() {
                     ]}
                     accessibilityRole="button"
                   >
-                    <Text style={styles.dismissBtnText}>Dismiss Report</Text>
+                    <Text style={styles.dismissBtnText}>{t('admin.actions.dismissReport')}</Text>
                   </Pressable>
 
                   <Pressable
                     onPress={() => {
                       if (!report.review) {
-                        Alert.alert('Review not found', 'This review was already removed. You can dismiss the report.');
+                          Alert.alert(t('admin.alert.reviewNotFoundTitle'), t('admin.alert.reviewNotFoundMessage'));
                         return;
                       }
 
-                      Alert.alert('Delete review', 'Delete flagged review and resolve this report?', [
-                        { text: 'Cancel', style: 'cancel' },
+                        Alert.alert(t('admin.alert.deleteReviewTitle'), t('admin.alert.deleteReviewMessage'), [
+                          { text: t('common.cancel'), style: 'cancel' },
                         {
-                          text: 'Delete',
+                            text: t('admin.actions.deleteReview'),
                           style: 'destructive',
                           onPress: () => {
                             void onDeleteReview(report);
@@ -558,7 +571,7 @@ export default function AdminDashboardScreen() {
                     ]}
                     accessibilityRole="button"
                   >
-                    <Text style={styles.deleteBtnText}>Delete Review</Text>
+                    <Text style={styles.deleteBtnText}>{t('admin.actions.deleteReview')}</Text>
                   </Pressable>
                 </View>
               </View>

@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as AuthSession from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
@@ -37,6 +38,7 @@ export default function LoginScreen() {
 
   const { width } = useWindowDimensions();
   const { isDark } = useTheme();
+  const { t } = useI18n();
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -113,7 +115,7 @@ export default function LoginScreen() {
         (googleResponse as any)?.params?.id_token;
 
       if (!idToken) {
-        Alert.alert('Đăng nhập thất bại', 'Không lấy được id_token từ Google.');
+        Alert.alert(t('auth.login.errorLoginFailedTitle'), t('auth.login.errorMissingGoogleIdToken'));
         return;
       }
 
@@ -126,13 +128,13 @@ export default function LoginScreen() {
 
         if (error) {
           console.log('Lỗi đăng nhập:', error.message);
-          Alert.alert('Lỗi đăng nhập', error.message);
+          Alert.alert(t('auth.login.errorLoginTitle'), error.message);
           return;
         }
 
         router.replace('/(tabs)');
       } catch {
-        Alert.alert('Lỗi kết nối', 'Không thể đăng nhập bằng Google lúc này.');
+        Alert.alert(t('auth.login.errorConnectionTitle'), t('auth.login.errorGoogleUnavailable'));
       } finally {
         setGoogleLoading(false);
       }
@@ -143,14 +145,14 @@ export default function LoginScreen() {
 
   const validate = () => {
     let newErrors: any = {};
-    if (!isLogin && !fullName) newErrors.fullName = 'Vui lòng nhập tên';
-    if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Email không hợp lệ';
+    if (!isLogin && !fullName) newErrors.fullName = t('auth.login.validation.fullNameRequired');
+    if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = t('auth.recovery.invalidEmailTitle');
     
     const isPassValid = Object.values(passwordCriteria).every(Boolean);
     if (!isPassValid && !isLogin) {
-      newErrors.password = 'Mật khẩu chưa đạt chuẩn bảo mật';
+      newErrors.password = t('auth.recovery.passwordWeakTitle');
     } else if (isLogin && password.length < 6) {
-      newErrors.password = 'Mật khẩu tối thiểu 6 ký tự';
+      newErrors.password = t('auth.login.validation.passwordMinLength');
     }
 
     setErrors(newErrors);
@@ -176,17 +178,17 @@ export default function LoginScreen() {
 
       if (error) {
         triggerShake();
-        Alert.alert('Lỗi hệ thống', error.message);
+        Alert.alert(t('auth.login.errorSystemTitle'), error.message);
       } else {
         if (isLogin) {
           router.replace('/(tabs)');
         } else {
-          Alert.alert('Thành công', 'Cậu hãy kiểm tra Gmail để xác thực tài khoản nhé!');
+          Alert.alert(t('auth.login.successTitle'), t('auth.login.successSignupVerifyEmail'));
           toggleAuthMode(true);
         }
       }
     } catch {
-      Alert.alert('Lỗi kết nối', 'Không thể kết nối tới Supabase.');
+      Alert.alert(t('auth.login.errorConnectionTitle'), t('auth.login.errorSupabaseConnection'));
     } finally {
       setLoading(false);
     }
@@ -214,8 +216,8 @@ export default function LoginScreen() {
               : 'EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID';
 
       Alert.alert(
-        'Thiếu cấu hình Google',
-        `Cần đặt ${missingKey} trong .env (đúng loại OAuth Client ID theo platform) rồi restart Expo.`
+        t('auth.login.errorMissingGoogleConfigTitle'),
+        t('auth.login.errorMissingGoogleConfigMessage', { key: missingKey })
       );
       return;
     }
@@ -236,7 +238,7 @@ export default function LoginScreen() {
 
       await googlePromptAsync();
     } catch {
-      Alert.alert('Đăng nhập thất bại', 'Không thể mở Google đăng nhập.');
+      Alert.alert(t('auth.login.errorLoginFailedTitle'), t('auth.login.errorOpenGoogleLogin'));
     }
   };
 
@@ -252,7 +254,7 @@ export default function LoginScreen() {
           <View style={styles.headerContent}>
             <View style={styles.logoCapsule}>
               <MaterialCommunityIcons name="earth" size={24} color={ExploreEaseColors.primary} />
-              <Text style={styles.logoText}>EXPLOREEASE</Text>
+              <Text style={styles.logoText}>{t('common.appNameUpper')}</Text>
             </View>
           </View>
         </SafeAreaView>
@@ -264,12 +266,12 @@ export default function LoginScreen() {
               {isLargeScreen && (
                 <BlurView intensity={20} tint="dark" style={styles.leftPanel}>
                   <Text style={styles.mainHeading}>
-                    Explore the World with {'\n'}
-                    <Text style={{ color: ExploreEaseColors.primary }}>Ease</Text>
+                    {t('auth.login.heroTitleLine1')} {'\n'}
+                    <Text style={{ color: ExploreEaseColors.primary }}>{t('auth.login.heroTitleLine2')}</Text>
                   </Text>
                   <View style={styles.adSpace}>
                     <MaterialCommunityIcons name="image-filter-hdr" size={40} color="rgba(255,255,255,0.3)" />
-                    <Text style={styles.adTitle}>SPONSORED DESTINATION</Text>
+                    <Text style={styles.adTitle}>{t('auth.login.heroSponsored')}</Text>
                   </View>
                 </BlurView>
               )}
@@ -280,45 +282,51 @@ export default function LoginScreen() {
                     
                     {/* --- LOGIN FORM --- */}
                     <View style={{ width: authPanelWidth, padding: isLargeScreen ? 50 : 30 }}>
-                      <Text style={[styles.welcomeTitle, { color: isDark ? 'white' : '#0f172a' }]}>Welcome Back</Text>
-                      <AuthInput label="Email" icon="email-outline" isDark={isDark} placeholder="you@example.com" value={email} onChangeText={setEmail} error={errors.email} />
-                      <AuthInput label="Password" icon="lock-outline" isDark={isDark} secure={!showPassword} placeholder="••••••••" value={password} onChangeText={setPassword} isPassword onTogglePassword={() => setShowPassword(!showPassword)} showPassword={showPassword} error={errors.password} />
+                      <Text style={[styles.welcomeTitle, { color: isDark ? 'white' : '#0f172a' }]}>{t('auth.login.welcomeBack')}</Text>
+                      <AuthInput label={t('auth.login.emailLabel')} icon="email-outline" isDark={isDark} placeholder={t('auth.login.emailPlaceholder')} value={email} onChangeText={setEmail} error={errors.email} />
+                      <AuthInput label={t('auth.login.passwordLabel')} icon="lock-outline" isDark={isDark} secure={!showPassword} placeholder={t('auth.login.passwordPlaceholder')} value={password} onChangeText={setPassword} isPassword onTogglePassword={() => setShowPassword(!showPassword)} showPassword={showPassword} error={errors.password} />
                       <TouchableOpacity onPress={() => router.push('/forgot-password')} style={{ alignSelf: 'flex-end', marginTop: 2 }}>
-                        <Text style={{ color: '#3b82f6', fontWeight: '700', fontSize: 12 }}>Forgot Password?</Text>
+                        <Text style={{ color: '#3b82f6', fontWeight: '700', fontSize: 12 }}>{t('auth.login.forgotPassword')}</Text>
                       </TouchableOpacity>
                       <TouchableOpacity onPress={handleAuthAction} disabled={loading} style={styles.signInButton}>
-                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.signInText}>Sign In</Text>}
+                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.signInText}>{t('auth.login.signIn')}</Text>}
                       </TouchableOpacity>
                       <SocialLoginArea
                         isDark={isDark}
                         disabled={!googleRequest || googleLoading}
                         loading={googleLoading}
                         onGooglePress={handleGoogleLogin}
+                        dividerText={t('auth.login.or')}
+                        googleButtonText={t('auth.login.continueWithGoogle')}
                       />
                       <TouchableOpacity onPress={() => toggleAuthMode(false)} style={styles.switchMode}>
-                        <Text style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Don&apos;t have an account? <Text style={styles.linkText}>Sign Up</Text></Text>
+                        <Text style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
+                          {t('auth.login.noAccount')} <Text style={styles.linkText}>{t('auth.login.signUp')}</Text>
+                        </Text>
                       </TouchableOpacity>
                     </View>
 
                     {/* --- SIGN UP FORM --- */}
                     <View style={{ width: authPanelWidth, padding: isLargeScreen ? 50 : 30 }}>
-                      <Text style={[styles.welcomeTitle, { color: isDark ? 'white' : '#0f172a' }]}>Create Account</Text>
-                      <AuthInput label="Full Name" icon="account-outline" isDark={isDark} placeholder="Nguyên đẹp trai" value={fullName} onChangeText={setFullName} error={errors.fullName} />
-                      <AuthInput label="Email" icon="email-outline" isDark={isDark} placeholder="you@example.com" value={email} onChangeText={setEmail} error={errors.email} />
-                      <AuthInput label="Password" icon="lock-outline" isDark={isDark} secure={!showPassword} placeholder="••••••••" value={password} onChangeText={setPassword} isPassword onTogglePassword={() => setShowPassword(!showPassword)} showPassword={showPassword} />
+                      <Text style={[styles.welcomeTitle, { color: isDark ? 'white' : '#0f172a' }]}>{t('auth.login.createAccount')}</Text>
+                      <AuthInput label={t('auth.login.fullNameLabel')} icon="account-outline" isDark={isDark} placeholder={t('auth.login.fullNamePlaceholder')} value={fullName} onChangeText={setFullName} error={errors.fullName} />
+                      <AuthInput label={t('auth.login.emailLabel')} icon="email-outline" isDark={isDark} placeholder={t('auth.login.emailPlaceholder')} value={email} onChangeText={setEmail} error={errors.email} />
+                      <AuthInput label={t('auth.login.passwordLabel')} icon="lock-outline" isDark={isDark} secure={!showPassword} placeholder={t('auth.login.passwordPlaceholder')} value={password} onChangeText={setPassword} isPassword onTogglePassword={() => setShowPassword(!showPassword)} showPassword={showPassword} />
                       
                       <View style={styles.checklistContainer}>
-                        <CheckItem label="Ít nhất 8 ký tự" met={passwordCriteria.minChar} isDark={isDark} />
-                        <CheckItem label="Chữ hoa & Chữ thường" met={passwordCriteria.hasUpper && passwordCriteria.hasLower} isDark={isDark} />
-                        <CheckItem label="Có ít nhất 1 con số" met={passwordCriteria.hasNumber} isDark={isDark} />
-                        <CheckItem label="Ký tự đặc biệt (@$!%...)" met={passwordCriteria.hasSpecial} isDark={isDark} />
+                        <CheckItem label={t('auth.recovery.ruleMinChar')} met={passwordCriteria.minChar} isDark={isDark} />
+                        <CheckItem label={t('auth.login.ruleUpperLower')} met={passwordCriteria.hasUpper && passwordCriteria.hasLower} isDark={isDark} />
+                        <CheckItem label={t('auth.recovery.ruleNumber')} met={passwordCriteria.hasNumber} isDark={isDark} />
+                        <CheckItem label={t('auth.recovery.ruleSpecial')} met={passwordCriteria.hasSpecial} isDark={isDark} />
                       </View>
 
                       <TouchableOpacity onPress={handleAuthAction} disabled={loading} style={[styles.signInButton, { backgroundColor: '#059669' }]}>
-                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.signInText}>Create Account</Text>}
+                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.signInText}>{t('auth.login.createAccount')}</Text>}
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => toggleAuthMode(true)} style={styles.switchMode}>
-                        <Text style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Already have account? <Text style={styles.linkText}>Login</Text></Text>
+                        <Text style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
+                          {t('auth.login.hasAccount')} <Text style={styles.linkText}>{t('auth.login.signIn')}</Text>
+                        </Text>
                       </TouchableOpacity>
                     </View>
 
@@ -368,14 +376,23 @@ type SocialLoginAreaProps = {
   disabled: boolean;
   loading: boolean;
   onGooglePress: () => void;
+  dividerText: string;
+  googleButtonText: string;
 };
 
-function SocialLoginArea({ isDark, disabled, loading, onGooglePress }: SocialLoginAreaProps) {
+function SocialLoginArea({
+  isDark,
+  disabled,
+  loading,
+  onGooglePress,
+  dividerText,
+  googleButtonText,
+}: SocialLoginAreaProps) {
   return (
     <View style={{ marginTop: 20 }}>
       <View style={styles.dividerRow}>
         <View style={[styles.dividerLine, { backgroundColor: isDark ? '#334155' : '#e2e8f0' }]} />
-        <Text style={styles.dividerText}>OR</Text>
+        <Text style={styles.dividerText}>{dividerText}</Text>
         <View style={[styles.dividerLine, { backgroundColor: isDark ? '#334155' : '#e2e8f0' }]} />
       </View>
       <TouchableOpacity
@@ -388,7 +405,7 @@ function SocialLoginArea({ isDark, disabled, loading, onGooglePress }: SocialLog
         {loading ? (
           <ActivityIndicator color="#0f172a" />
         ) : (
-          <Text className="font-bold text-slate-950">Tiếp tục với Google</Text>
+          <Text className="font-bold text-slate-950">{googleButtonText}</Text>
         )}
       </TouchableOpacity>
     </View>

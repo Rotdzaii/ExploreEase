@@ -3,6 +3,7 @@ import { ShareTripBottomSheet } from '@/components/trips/ShareTripBottomSheet';
 import { TripActionBar } from '@/components/trips/TripActionBar';
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { itineraryService } from '@/src/services/itineraryService';
 import { reminderService } from '@/src/services/reminderService';
 import { tripService, type TripRow } from '@/src/services/tripService';
@@ -46,11 +47,9 @@ const parseDateOnly = (value: string | null | undefined): Date | null => {
   return new Date(year, month - 1, day);
 };
 
-const toVnShortDate = (d: Date | null): string => {
+const toShortDate = (d: Date | null, locale: string): string => {
   if (!d) return '';
-  const day = d.getDate();
-  const month = d.getMonth() + 1;
-  return `${day} Thang ${month}`;
+  return d.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
 };
 
 const toDaysCount = (start: Date | null, end: Date | null): number => {
@@ -61,7 +60,7 @@ const toDaysCount = (start: Date | null, end: Date | null): number => {
   return Math.min(days, 60);
 };
 
-const mapTripRowToDetail = (row: TripRow): TripDetail => {
+const mapTripRowToDetail = (row: TripRow, locale: string): TripDetail => {
   const start = parseDateOnly(row.start_date ?? null);
   const end = parseDateOnly(row.end_date ?? null);
 
@@ -69,8 +68,8 @@ const mapTripRowToDetail = (row: TripRow): TripDetail => {
     id: row.id,
     name: row.name,
     destination: row.destination ?? '',
-    startDate: toVnShortDate(start),
-    endDate: toVnShortDate(end),
+    startDate: toShortDate(start, locale),
+    endDate: toShortDate(end, locale),
     daysCount: toDaysCount(start, end),
   };
 };
@@ -81,6 +80,8 @@ export default function ItineraryDetailScreen() {
   const tripId = params.id ? String(params.id) : '';
 
   const { isDark } = useTheme();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'vi-VN';
   const colors = useMemo(
     () => ({
       background: isDark ? ExploreEaseColors.background : '#f8fafc',
@@ -111,7 +112,7 @@ export default function ItineraryDetailScreen() {
   const loadTrip = useCallback(async () => {
     if (!tripId) {
       setTrip(null);
-      setErrorMessage('Thieu itinerary id.');
+      setErrorMessage(t('itinerary.error.missingId'));
       setLoading(false);
       return;
     }
@@ -123,21 +124,21 @@ export default function ItineraryDetailScreen() {
       const row = await tripService.getTripByIdForCurrentUser(tripId);
       if (!row) {
         setTrip(null);
-        setErrorMessage('Khong tim thay ke hoach nay.');
+        setErrorMessage(t('itinerary.error.notFound'));
         return;
       }
 
-      const mapped = mapTripRowToDetail(row);
+      const mapped = mapTripRowToDetail(row, locale);
       setTrip(mapped);
       setSelectedDay((prev) => Math.min(Math.max(1, prev), mapped.daysCount));
     } catch (err: any) {
       console.warn('loadTrip failed:', err?.message ?? err);
       setTrip(null);
-      setErrorMessage('Khong the tai ke hoach.');
+      setErrorMessage(t('itinerary.error.load'));
     } finally {
       setLoading(false);
     }
-  }, [tripId]);
+  }, [locale, t, tripId]);
 
   useEffect(() => {
     void loadTrip();
@@ -178,9 +179,9 @@ export default function ItineraryDetailScreen() {
       setNotes(next ?? []);
     } catch (err: any) {
       console.warn('addNote failed:', err?.message ?? err);
-      Alert.alert('Khong the luu ghi chu', 'Vui long thu lai sau.');
+      Alert.alert(t('trips.notes.saveErrorTitle'), t('trips.error.tryAgainLater'));
     }
-  }, [noteDraft, selectedDay, trip]);
+  }, [noteDraft, selectedDay, t, trip]);
 
   const onPressReminder = useCallback(
     (item: any) => {
@@ -194,44 +195,44 @@ export default function ItineraryDetailScreen() {
       tomorrow8.setHours(8, 0, 0, 0);
 
       Alert.alert(
-        'Dat nhac nho',
-        `Chon thoi gian nhac nho cho "${item.name}"`,
+        t('trips.reminder.title'),
+        t('trips.reminder.pickTime', { name: item.name }),
         [
           {
-            text: '15 phut nua',
+            text: t('trips.reminder.in15m'),
             onPress: () => {
               void reminderService.createReminder({
                 tripId: trip.id,
-                message: `Nhac nho: ${item.name} (Ngay ${selectedDay})`,
+                message: t('trips.reminder.message', { name: item.name, day: selectedDay }),
                 remindAt: remind15,
               });
             },
           },
           {
-            text: '1 gio nua',
+            text: t('trips.reminder.in1h'),
             onPress: () => {
               void reminderService.createReminder({
                 tripId: trip.id,
-                message: `Nhac nho: ${item.name} (Ngay ${selectedDay})`,
+                message: t('trips.reminder.message', { name: item.name, day: selectedDay }),
                 remindAt: remind60,
               });
             },
           },
           {
-            text: 'Ngay mai 08:00',
+            text: t('trips.reminder.tomorrow8'),
             onPress: () => {
               void reminderService.createReminder({
                 tripId: trip.id,
-                message: `Nhac nho: ${item.name} (Ngay ${selectedDay})`,
+                message: t('trips.reminder.message', { name: item.name, day: selectedDay }),
                 remindAt: tomorrow8,
               });
             },
           },
-          { text: 'Huy', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
         ]
       );
     },
-    [selectedDay, trip]
+    [selectedDay, t, trip]
   );
 
   const onPressAddDestination = useCallback(() => {
@@ -244,7 +245,7 @@ export default function ItineraryDetailScreen() {
         <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.centerWrap}>
           <ActivityIndicator color={ExploreEaseColors.primary} />
-          <Text style={[styles.stateText, { color: colors.subtitle }]}>Dang tai ke hoach...</Text>
+          <Text style={[styles.stateText, { color: colors.subtitle }]}>{t('itinerary.loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -255,17 +256,17 @@ export default function ItineraryDetailScreen() {
       <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
         <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.centerWrap}>
-          <Text style={[styles.stateTitle, { color: colors.title }]}>{errorMessage ?? 'Khong tim thay ke hoach.'}</Text>
+          <Text style={[styles.stateTitle, { color: colors.title }]}>{errorMessage ?? t('itinerary.error.notFound')}</Text>
           <View style={styles.actionRow}>
             <Pressable
               onPress={() => router.back()}
               style={({ pressed }) => [styles.outlineBtn, { borderColor: colors.border }, pressed ? { opacity: 0.84 } : null]}
             >
-              <Text style={[styles.outlineBtnText, { color: colors.title }]}>Quay lai</Text>
+              <Text style={[styles.outlineBtnText, { color: colors.title }]}>{t('itinerary.back')}</Text>
             </Pressable>
 
             <Pressable onPress={() => void loadTrip()} style={({ pressed }) => [styles.solidBtn, pressed ? { opacity: 0.84 } : null]}>
-              <Text style={styles.solidBtnText}>Thu lai</Text>
+              <Text style={styles.solidBtnText}>{t('common.retry')}</Text>
             </Pressable>
           </View>
         </View>
@@ -286,7 +287,7 @@ export default function ItineraryDetailScreen() {
             pressed ? { opacity: 0.85 } : null,
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Quay lai danh sach ke hoach"
+          accessibilityLabel={t('itinerary.a11y.backToTrips')}
         >
           <Feather name="chevron-left" size={24} color={colors.title} />
         </Pressable>
@@ -303,14 +304,18 @@ export default function ItineraryDetailScreen() {
             pressed ? { opacity: 0.85 } : null,
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Chia se ke hoach"
+          accessibilityLabel={t('trips.a11y.shareTrip')}
         >
           <Feather name="share-2" size={20} color={colors.title} />
         </Pressable>
       </View>
 
       <Text style={[styles.detailSub, { color: colors.subtitle }]}>
-        {trip.startDate} - {trip.endDate} | {trip.daysCount} ngay
+        {t('trips.detail.dateRange', {
+          start: trip.startDate,
+          end: trip.endDate,
+          days: trip.daysCount,
+        })}
       </Text>
 
       <ScrollView contentContainerStyle={styles.detailScroll} showsVerticalScrollIndicator={false}>
@@ -331,14 +336,14 @@ export default function ItineraryDetailScreen() {
                 ]}
                 accessibilityRole="button"
               >
-                <Text style={[styles.dayTabText, { color: active ? '#001018' : colors.subtitle }]}>Ngay {d}</Text>
+                <Text style={[styles.dayTabText, { color: active ? '#001018' : colors.subtitle }]}>{t('trips.dayLabel', { day: d })}</Text>
               </Pressable>
             );
           })}
         </ScrollView>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>Timeline ngay {selectedDay}</Text>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('trips.timelineTitle', { day: selectedDay })}</Text>
           <DayTimeline
             tripId={trip.id}
             day={selectedDay}
@@ -349,7 +354,7 @@ export default function ItineraryDetailScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>Ghi chu</Text>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('trips.notes.title')}</Text>
           <View
             style={[
               styles.notesCard,
@@ -363,7 +368,7 @@ export default function ItineraryDetailScreen() {
               <TextInput
                 value={noteDraft}
                 onChangeText={setNoteDraft}
-                placeholder="Nhap ghi chu cho ngay nay..."
+                placeholder={t('trips.notes.placeholder')}
                 placeholderTextColor={colors.subtitle}
                 style={[styles.noteInput, { color: colors.title }]}
               />
@@ -382,7 +387,7 @@ export default function ItineraryDetailScreen() {
             </View>
 
             {notes.length === 0 ? (
-              <Text style={[styles.notesEmpty, { color: colors.subtitle }]}>Chua co ghi chu nao.</Text>
+              <Text style={[styles.notesEmpty, { color: colors.subtitle }]}>{t('trips.notes.empty')}</Text>
             ) : (
               <View style={styles.notesList}>
                 {notes.map((n, idx) => (

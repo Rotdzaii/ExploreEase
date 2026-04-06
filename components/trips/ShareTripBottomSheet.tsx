@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { Feather } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import React, { useCallback, useMemo, useRef } from 'react';
@@ -24,6 +25,7 @@ type ShareTripBottomSheetProps = {
 
 export function ShareTripBottomSheet({ isOpen, tripName, tripCode, onClose }: ShareTripBottomSheetProps) {
   const { isDark } = useTheme();
+  const { t } = useI18n();
   const sheetRef = useRef<BottomSheet>(null);
 
   const snapPoints = useMemo(() => ['48%'], []);
@@ -58,7 +60,7 @@ export function ShareTripBottomSheet({ isOpen, tripName, tripCode, onClose }: Sh
   );
 
   const handleShare = useCallback(async () => {
-    const message = `Kế hoạch du lịch: ${tripName}\nMã kế hoạch: ${tripCode}`;
+    const message = t('trips.share.message', { tripName, tripCode });
 
     try {
       if (NativeShare?.default?.open) {
@@ -71,9 +73,9 @@ export function ShareTripBottomSheet({ isOpen, tripName, tripCode, onClose }: Sh
       // user cancelled -> ignore
       const msg = (err?.message ?? '').toLowerCase();
       if (msg.includes('cancel')) return;
-      Alert.alert('Không thể chia sẻ', 'Vui lòng thử lại sau.');
+      Alert.alert(t('trips.share.failedTitle'), t('trips.error.tryAgainLater'));
     }
-  }, [tripCode, tripName]);
+  }, [t, tripCode, tripName]);
 
   return (
     <BottomSheet
@@ -88,7 +90,7 @@ export function ShareTripBottomSheet({ isOpen, tripName, tripCode, onClose }: Sh
     >
       <View style={styles.content}>
         <View style={styles.headerRow}>
-          <Text style={[styles.title, { color: colors.title }]}>Chia sẻ kế hoạch</Text>
+          <Text style={[styles.title, { color: colors.title }]}>{t('trips.share.title')}</Text>
           <Pressable
             onPress={onClose}
             style={({ pressed, hovered }) => [
@@ -98,14 +100,14 @@ export function ShareTripBottomSheet({ isOpen, tripName, tripCode, onClose }: Sh
               pressed ? { opacity: 0.8 } : null,
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Đóng"
+            accessibilityLabel={t('trips.share.close')}
           >
             <Feather name="x" size={18} color={colors.title} />
           </Pressable>
         </View>
 
         <Text style={[styles.subtitle, { color: colors.subtitle }]} numberOfLines={2}>
-          Quét QR hoặc gửi mã để bạn bè tham gia.
+          {t('trips.share.subtitle')}
         </Text>
 
         <View style={[styles.qrCard, { backgroundColor: '#ffffff', borderColor: colors.border }]}>
@@ -124,7 +126,7 @@ export function ShareTripBottomSheet({ isOpen, tripName, tripCode, onClose }: Sh
           accessibilityRole="button"
         >
           <Feather name="share-2" size={18} color="#001018" />
-          <Text style={styles.shareText}>Chia sẻ</Text>
+          <Text style={styles.shareText}>{t('trips.share.action')}</Text>
         </Pressable>
       </View>
     </BottomSheet>

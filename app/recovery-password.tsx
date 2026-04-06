@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { supabase } from '@/src/services/supabase';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -49,6 +50,7 @@ const getProgressStep = (step: RecoveryStep) => {
 
 export default function RecoveryPasswordScreen() {
   const { isDark } = useTheme();
+  const { t } = useI18n();
 
   const [currentStep, setCurrentStep] = useState<RecoveryStep>('email');
   const [email, setEmail] = useState('');
@@ -83,7 +85,7 @@ export default function RecoveryPasswordScreen() {
   const sendResetEmail = async () => {
     const cleanEmail = email.trim().toLowerCase();
     if (!EMAIL_REGEX.test(cleanEmail)) {
-      Alert.alert('Email không hợp lệ', 'Vui lòng nhập đúng định dạng email.');
+      Alert.alert(t('auth.recovery.invalidEmailTitle'), t('auth.recovery.invalidEmailMessage'));
       return;
     }
 
@@ -95,9 +97,9 @@ export default function RecoveryPasswordScreen() {
       setEmail(cleanEmail);
       setOtp('');
       setCurrentStep('otp');
-      Alert.alert('Đã gửi mã OTP', 'Kiểm tra email để lấy mã xác thực khôi phục mật khẩu.');
+      Alert.alert(t('auth.recovery.otpSentTitle'), t('auth.recovery.otpSentMessage'));
     } catch (err: any) {
-      Alert.alert('Không thể gửi OTP', err?.message ?? 'Vui lòng thử lại sau.');
+      Alert.alert(t('auth.recovery.otpSendFailedTitle'), err?.message ?? t('trips.error.tryAgainLater'));
     } finally {
       setLoading(false);
     }
@@ -106,7 +108,7 @@ export default function RecoveryPasswordScreen() {
   const verifyOtp = async () => {
     const cleanOtp = otp.trim();
     if (!cleanOtp) {
-      Alert.alert('Thiếu mã OTP', 'Vui lòng nhập mã OTP bạn nhận được qua email.');
+      Alert.alert(t('auth.recovery.otpMissingTitle'), t('auth.recovery.otpMissingMessage'));
       return;
     }
 
@@ -129,7 +131,7 @@ export default function RecoveryPasswordScreen() {
 
       setCurrentStep('password');
     } catch (err: any) {
-      Alert.alert('OTP không hợp lệ', err?.message ?? 'Vui lòng kiểm tra lại mã OTP.');
+      Alert.alert(t('auth.recovery.otpInvalidTitle'), err?.message ?? t('auth.recovery.otpInvalidMessage'));
     } finally {
       setLoading(false);
     }
@@ -137,7 +139,7 @@ export default function RecoveryPasswordScreen() {
 
   const resendOtp = async () => {
     if (!EMAIL_REGEX.test(email.trim().toLowerCase())) {
-      Alert.alert('Email không hợp lệ', 'Vui lòng nhập đúng định dạng email trước khi gửi lại OTP.');
+      Alert.alert(t('auth.recovery.invalidEmailTitle'), t('auth.recovery.invalidEmailBeforeResend'));
       return;
     }
 
@@ -145,9 +147,9 @@ export default function RecoveryPasswordScreen() {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
       if (error) throw error;
-      Alert.alert('Đã gửi lại OTP', 'Vui lòng kiểm tra email của bạn.');
+      Alert.alert(t('auth.recovery.otpResentTitle'), t('auth.recovery.otpResentMessage'));
     } catch (err: any) {
-      Alert.alert('Không thể gửi lại OTP', err?.message ?? 'Vui lòng thử lại sau.');
+      Alert.alert(t('auth.recovery.otpResendFailedTitle'), err?.message ?? t('trips.error.tryAgainLater'));
     } finally {
       setLoading(false);
     }
@@ -155,12 +157,12 @@ export default function RecoveryPasswordScreen() {
 
   const updatePassword = async () => {
     if (!isPasswordValid) {
-      Alert.alert('Mật khẩu chưa đạt chuẩn', 'Vui lòng đáp ứng đầy đủ các tiêu chí bảo mật.');
+      Alert.alert(t('auth.recovery.passwordWeakTitle'), t('auth.recovery.passwordWeakMessage'));
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      Alert.alert('Mật khẩu không khớp', 'Vui lòng nhập lại mật khẩu xác nhận.');
+      Alert.alert(t('auth.recovery.passwordMismatchTitle'), t('auth.recovery.passwordMismatchMessage'));
       return;
     }
 
@@ -171,7 +173,7 @@ export default function RecoveryPasswordScreen() {
 
       setCurrentStep('success');
     } catch (err: any) {
-      Alert.alert('Không thể cập nhật mật khẩu', err?.message ?? 'Vui lòng thử lại sau.');
+      Alert.alert(t('auth.recovery.passwordUpdateFailedTitle'), err?.message ?? t('trips.error.tryAgainLater'));
     } finally {
       setLoading(false);
     }
@@ -190,7 +192,7 @@ export default function RecoveryPasswordScreen() {
     if (isSuccess) {
       return (
         <View style={{ alignItems: 'center' }}>
-          <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700' }}>Hoàn tất đặt lại mật khẩu</Text>
+          <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700' }}>{t('auth.recovery.progressDone')}</Text>
         </View>
       );
     }
@@ -214,7 +216,7 @@ export default function RecoveryPasswordScreen() {
         </View>
 
         <Text style={{ marginTop: 10, color: colors.muted, fontSize: 12, fontWeight: '700' }}>
-          Bước {stepLabel} của 3
+          {t('auth.recovery.progressStep', { current: stepLabel })}
         </Text>
       </View>
     );
@@ -223,17 +225,17 @@ export default function RecoveryPasswordScreen() {
   const renderEmailStep = () => {
     return (
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-        <Text style={[styles.title, { color: colors.title }]}>Quên mật khẩu</Text>
-        <Text style={[styles.subtitle, { color: colors.body }]}>Nhập email để nhận mã OTP khôi phục mật khẩu.</Text>
+        <Text style={[styles.title, { color: colors.title }]}>{t('auth.recovery.forgotPasswordTitle')}</Text>
+        <Text style={[styles.subtitle, { color: colors.body }]}>{t('auth.recovery.forgotPasswordSubtitle')}</Text>
 
-        <Text style={[styles.label, { color: colors.body }]}>Email</Text>
+        <Text style={[styles.label, { color: colors.body }]}>{t('auth.login.emailLabel')}</Text>
         <TextInput
           value={email}
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
-          placeholder="you@example.com"
+          placeholder={t('auth.login.emailPlaceholder')}
           placeholderTextColor={colors.muted}
           style={[
             styles.input,
@@ -258,7 +260,7 @@ export default function RecoveryPasswordScreen() {
           {loading ? (
             <ActivityIndicator color="#001018" />
           ) : (
-            <Text style={styles.primaryBtnText}>Tiếp tục</Text>
+            <Text style={styles.primaryBtnText}>{t('auth.profileSetup.continue')}</Text>
           )}
         </Pressable>
       </View>
@@ -268,15 +270,15 @@ export default function RecoveryPasswordScreen() {
   const renderOtpStep = () => {
     return (
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-        <Text style={[styles.title, { color: colors.title }]}>Xác thực OTP</Text>
-        <Text style={[styles.subtitle, { color: colors.body }]}>Nhập mã OTP đã gửi tới {email}.</Text>
+        <Text style={[styles.title, { color: colors.title }]}>{t('auth.recovery.verifyOtpTitle')}</Text>
+        <Text style={[styles.subtitle, { color: colors.body }]}>{t('auth.recovery.verifyOtpSubtitle', { email })}</Text>
 
-        <Text style={[styles.label, { color: colors.body }]}>Mã OTP</Text>
+        <Text style={[styles.label, { color: colors.body }]}>{t('auth.recovery.otpLabel')}</Text>
         <TextInput
           value={otp}
           onChangeText={setOtp}
           keyboardType="number-pad"
-          placeholder="Nhập mã OTP"
+          placeholder={t('auth.recovery.otpPlaceholder')}
           placeholderTextColor={colors.muted}
           style={[
             styles.input,
@@ -301,7 +303,7 @@ export default function RecoveryPasswordScreen() {
           {loading ? (
             <ActivityIndicator color="#001018" />
           ) : (
-            <Text style={styles.primaryBtnText}>Xác nhận OTP</Text>
+            <Text style={styles.primaryBtnText}>{t('auth.recovery.verifyOtpAction')}</Text>
           )}
         </Pressable>
 
@@ -311,7 +313,7 @@ export default function RecoveryPasswordScreen() {
           style={({ pressed }) => [styles.linkBtn, pressed ? { opacity: 0.8 } : null]}
           accessibilityRole="button"
         >
-          <Text style={styles.linkBtnText}>Gửi lại OTP</Text>
+          <Text style={styles.linkBtnText}>{t('auth.recovery.resendOtpAction')}</Text>
         </Pressable>
       </View>
     );
@@ -320,10 +322,10 @@ export default function RecoveryPasswordScreen() {
   const renderPasswordStep = () => {
     return (
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-        <Text style={[styles.title, { color: colors.title }]}>Đặt mật khẩu mới</Text>
-        <Text style={[styles.subtitle, { color: colors.body }]}>Mật khẩu cần đủ mạnh để bảo vệ tài khoản.</Text>
+        <Text style={[styles.title, { color: colors.title }]}>{t('auth.recovery.newPasswordTitle')}</Text>
+        <Text style={[styles.subtitle, { color: colors.body }]}>{t('auth.recovery.newPasswordSubtitle')}</Text>
 
-        <Text style={[styles.label, { color: colors.body }]}>Mật khẩu mới</Text>
+        <Text style={[styles.label, { color: colors.body }]}>{t('auth.recovery.newPasswordLabel')}</Text>
         <View
           style={[
             styles.passwordWrap,
@@ -337,7 +339,7 @@ export default function RecoveryPasswordScreen() {
             value={newPassword}
             onChangeText={setNewPassword}
             secureTextEntry={!showPassword}
-            placeholder="••••••••"
+            placeholder={t('auth.login.passwordPlaceholder')}
             placeholderTextColor={colors.muted}
             style={[styles.passwordInput, { color: colors.inputText }]}
           />
@@ -350,7 +352,7 @@ export default function RecoveryPasswordScreen() {
           </Pressable>
         </View>
 
-        <Text style={[styles.label, { color: colors.body }]}>Xác nhận mật khẩu</Text>
+        <Text style={[styles.label, { color: colors.body }]}>{t('auth.recovery.confirmPasswordLabel')}</Text>
         <View
           style={[
             styles.passwordWrap,
@@ -364,7 +366,7 @@ export default function RecoveryPasswordScreen() {
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry={!showConfirmPassword}
-            placeholder="Nhập lại mật khẩu"
+            placeholder={t('auth.recovery.confirmPasswordPlaceholder')}
             placeholderTextColor={colors.muted}
             style={[styles.passwordInput, { color: colors.inputText }]}
           />
@@ -378,10 +380,10 @@ export default function RecoveryPasswordScreen() {
         </View>
 
         <View style={styles.criteriaWrap}>
-          <PasswordRule label="Ít nhất 8 ký tự" met={passwordCriteria.minChar} isDark={isDark} />
-          <PasswordRule label="Có chữ hoa và chữ thường" met={passwordCriteria.hasUpper && passwordCriteria.hasLower} isDark={isDark} />
-          <PasswordRule label="Có ít nhất 1 chữ số" met={passwordCriteria.hasNumber} isDark={isDark} />
-          <PasswordRule label="Có ký tự đặc biệt (@$!%...)" met={passwordCriteria.hasSpecial} isDark={isDark} />
+          <PasswordRule label={t('auth.recovery.ruleMinChar')} met={passwordCriteria.minChar} isDark={isDark} />
+          <PasswordRule label={t('auth.recovery.ruleUpperLower')} met={passwordCriteria.hasUpper && passwordCriteria.hasLower} isDark={isDark} />
+          <PasswordRule label={t('auth.recovery.ruleNumber')} met={passwordCriteria.hasNumber} isDark={isDark} />
+          <PasswordRule label={t('auth.recovery.ruleSpecial')} met={passwordCriteria.hasSpecial} isDark={isDark} />
         </View>
 
         <Pressable
@@ -397,7 +399,7 @@ export default function RecoveryPasswordScreen() {
           {loading ? (
             <ActivityIndicator color="#001018" />
           ) : (
-            <Text style={styles.primaryBtnText}>Cập nhật mật khẩu</Text>
+            <Text style={styles.primaryBtnText}>{t('auth.recovery.updatePasswordAction')}</Text>
           )}
         </Pressable>
       </View>
@@ -413,9 +415,9 @@ export default function RecoveryPasswordScreen() {
           </View>
         </View>
 
-        <Text style={[styles.title, { color: colors.title, textAlign: 'center' }]}>Thành công!</Text>
+        <Text style={[styles.title, { color: colors.title, textAlign: 'center' }]}>{t('auth.recovery.successTitle')}</Text>
         <Text style={[styles.subtitle, { color: colors.body, textAlign: 'center' }]}> 
-          Mật khẩu đã được cập nhật. Vui lòng đăng nhập lại bằng mật khẩu mới.
+          {t('auth.recovery.successSubtitle')}
         </Text>
 
         <Pressable
@@ -423,7 +425,7 @@ export default function RecoveryPasswordScreen() {
           style={({ pressed }) => [styles.primaryBtn, pressed ? { opacity: 0.86 } : null]}
           accessibilityRole="button"
         >
-          <Text style={styles.primaryBtnText}>Quay lại đăng nhập</Text>
+          <Text style={styles.primaryBtnText}>{t('auth.recovery.backToLogin')}</Text>
         </Pressable>
 
         <View
@@ -437,7 +439,7 @@ export default function RecoveryPasswordScreen() {
           }}
         >
           <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
-            Nếu bạn không thực hiện thay đổi này, hãy liên hệ hỗ trợ ngay.
+            {t('auth.recovery.securityHint')}
           </Text>
         </View>
       </View>
@@ -456,7 +458,7 @@ export default function RecoveryPasswordScreen() {
             >
               <MaterialCommunityIcons name="chevron-left" size={22} color={colors.title} />
             </Pressable>
-            <Text style={[styles.headerTitle, { color: colors.title }]}>Khôi phục mật khẩu</Text>
+            <Text style={[styles.headerTitle, { color: colors.title }]}>{t('auth.recovery.headerTitle')}</Text>
             <View style={{ width: 40 }} />
           </View>
 

@@ -5,10 +5,14 @@ import React, { useCallback } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, Text, View } from 'react-native';
 
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
+import { useI18n } from '@/src/i18n/useI18n';
 
 export type LatLng = { latitude: number; longitude: number };
 
-async function openGoogleMapsDirections(coords: LatLng) {
+async function openGoogleMapsDirections(
+  coords: LatLng,
+  t: (key: string, params?: Record<string, string | number>) => string
+) {
   const destination = `${coords.latitude},${coords.longitude}`;
   const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
 
@@ -29,7 +33,7 @@ async function openGoogleMapsDirections(coords: LatLng) {
 
     await Linking.openURL(webUrl);
   } catch (err: any) {
-    Alert.alert('Lỗi', err?.message ?? 'Không thể mở Google Maps');
+    Alert.alert(t('auth.profileSetup.errorTitle'), err?.message ?? t('map.openGoogleMapsFailed'));
   }
 }
 
@@ -44,10 +48,12 @@ export function MapRedirectCard({
   loading: boolean;
   hint?: string | null;
 }) {
+  const { t } = useI18n();
+
   const onPressDirections = useCallback(async () => {
     if (!coords) return;
-    await openGoogleMapsDirections(coords);
-  }, [coords]);
+    await openGoogleMapsDirections(coords, t);
+  }, [coords, t]);
 
   return (
     <BlurView
@@ -88,7 +94,7 @@ export function MapRedirectCard({
             </Text>
           </View>
         ) : (
-          <Text style={{ color: 'rgba(148,163,184,0.95)', fontWeight: '700' }}>Không có thông tin vị trí</Text>
+          <Text style={{ color: 'rgba(148,163,184,0.95)', fontWeight: '700' }}>{t('map.noLocationInfo')}</Text>
         )}
       </View>
 
@@ -109,9 +115,10 @@ export function MapRedirectCard({
           },
         ]}
         accessibilityRole="button"
+        accessibilityLabel={t('destination.directions.title')}
       >
         <MaterialCommunityIcons name="directions" size={18} color={ExploreEaseColors.background} />
-        <Text style={{ color: ExploreEaseColors.background, fontWeight: '900' }}>Chỉ đường</Text>
+        <Text style={{ color: ExploreEaseColors.background, fontWeight: '900' }}>{t('destination.directions.title')}</Text>
       </Pressable>
 
       {hint ? (

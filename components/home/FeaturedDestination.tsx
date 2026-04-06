@@ -4,6 +4,7 @@ import React from 'react';
 import { ImageBackground, Platform, Pressable, Text, View } from 'react-native';
 
 import { ExploreEaseColors } from '../../constants/exploreEaseTheme';
+import { useI18n } from '../../src/i18n/useI18n';
 
 type FeaturedDestinationProps = {
   styles: any;
@@ -24,9 +25,11 @@ export function FeaturedDestination({
   imageUrl,
   onPress,
 }: FeaturedDestinationProps) {
+  const { t } = useI18n();
+
   return (
     <View>
-      <Text style={styles.sectionTitle}>Featured Destination</Text>
+      <Text style={styles.sectionTitle}>{t('home.featuredDestination')}</Text>
       <ImageBackground source={{ uri: imageUrl }} style={styles.featuredCard} imageStyle={styles.featuredImage}>
         <LinearGradient
           colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.12)', 'rgba(0,0,0,0.42)']}
@@ -58,8 +61,9 @@ export function FeaturedDestination({
             ]}
             onPress={onPress}
             accessibilityRole="button"
+            accessibilityLabel={t('home.viewDetails')}
           >
-            <Text style={styles.viewDetailsText}>View Details</Text>
+            <Text style={styles.viewDetailsText}>{t('home.viewDetails')}</Text>
             <MaterialCommunityIcons name="arrow-right" size={16} color={ExploreEaseColors.background} />
           </Pressable>
         </LinearGradient>

@@ -1,12 +1,14 @@
+import { useI18n } from '@/src/i18n/useI18n';
 import { router } from 'expo-router'; //
 import React, { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../src/services/supabase';
 
 export default function ProfileSetupScreen() {
+  const { t } = useI18n();
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
-  const [gender, setGender] = useState('Chọn');
+  const [gender, setGender] = useState('');
   const [travelStyle, setTravelStyle] = useState('solo');
 
   const handleCompleteSetup = async () => {
@@ -25,31 +27,47 @@ export default function ProfileSetupScreen() {
       })
       .eq('id', user.id);
 
-    if (error) Alert.alert("Lỗi", "Không thể cập nhật hồ sơ");
+    if (error) Alert.alert(t('auth.profileSetup.errorTitle'), t('auth.profileSetup.errorUpdateProfile'));
     else router.push('./interests'); //
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Hãy để chúng tôi hiểu thêm về bạn</Text>
+      <Text style={styles.title}>{t('auth.profileSetup.title')}</Text>
       
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Họ và Tên</Text>
-        <TextInput style={styles.input} value={fullName} onChangeText={setFullName} placeholder="VD: Nguyễn Văn A" />
+        <Text style={styles.label}>{t('auth.profileSetup.fullNameLabel')}</Text>
+        <TextInput
+          style={styles.input}
+          value={fullName}
+          onChangeText={setFullName}
+          placeholder={t('auth.profileSetup.fullNamePlaceholder')}
+        />
       </View>
 
       <View style={styles.row}>
         <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
-          <Text style={styles.label}>Tuổi</Text>
-          <TextInput style={styles.input} value={age} onChangeText={setAge} keyboardType="numeric" placeholder="25" />
+          <Text style={styles.label}>{t('auth.profileSetup.ageLabel')}</Text>
+          <TextInput
+            style={styles.input}
+            value={age}
+            onChangeText={setAge}
+            keyboardType="numeric"
+            placeholder={t('auth.profileSetup.agePlaceholder')}
+          />
         </View>
         <View style={[styles.inputGroup, { flex: 1 }]}>
-          <Text style={styles.label}>Giới tính</Text>
-          <TextInput style={styles.input} value={gender} onChangeText={setGender} placeholder="Nam/Nữ" />
+          <Text style={styles.label}>{t('auth.profileSetup.genderLabel')}</Text>
+          <TextInput
+            style={styles.input}
+            value={gender}
+            onChangeText={setGender}
+            placeholder={t('auth.profileSetup.genderPlaceholder')}
+          />
         </View>
       </View>
 
-      <Text style={styles.subTitle}>Bạn thường đi du lịch như thế nào?</Text>
+      <Text style={styles.subTitle}>{t('auth.profileSetup.travelStyleQuestion')}</Text>
       <View style={styles.styleGrid}>
         {['solo', 'family', 'group'].map((style) => (
           <TouchableOpacity 
@@ -58,14 +76,18 @@ export default function ProfileSetupScreen() {
             onPress={() => setTravelStyle(style)}
           >
             <Text style={[styles.styleText, travelStyle === style && styles.activeText]}>
-              {style === 'solo' ? 'Độc hành' : style === 'family' ? 'Gia đình' : 'Theo nhóm'}
+              {style === 'solo'
+                ? t('auth.profileSetup.travelStyle.solo')
+                : style === 'family'
+                  ? t('auth.profileSetup.travelStyle.family')
+                  : t('auth.profileSetup.travelStyle.group')}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
       <TouchableOpacity style={styles.nextBtn} onPress={handleCompleteSetup}>
-        <Text style={styles.nextBtnText}>Tiếp tục</Text>
+        <Text style={styles.nextBtnText}>{t('auth.profileSetup.continue')}</Text>
       </TouchableOpacity>
     </ScrollView>
   );

@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { supabase } from '@/src/services/supabase';
 import { Feather } from '@expo/vector-icons';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -39,15 +40,17 @@ type NotificationSection = {
 
 const TYPE_ORDER: NotificationType[] = ['review', 'event', 'system'];
 
-const TYPE_TITLES: Record<NotificationType, string> = {
-  review: 'Danh gia',
-  event: 'Su kien',
-  system: 'He thong',
+const TYPE_TITLE_KEYS: Record<NotificationType, string> = {
+  review: 'notifications.type.review',
+  event: 'notifications.type.event',
+  system: 'notifications.type.system',
 };
 
 export default function NotificationsScreen() {
   const { width: screenWidth } = useWindowDimensions();
   const { isDark } = useTheme();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'vi-VN';
   const [userId, setUserId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -265,16 +268,16 @@ export default function NotificationsScreen() {
     return TYPE_ORDER
       .map((key) => ({
         key,
-        title: TYPE_TITLES[key],
+        title: t(TYPE_TITLE_KEYS[key]),
         data: groups[key],
       }))
       .filter((section) => section.data.length > 0);
-  }, [notifications]);
+  }, [notifications, t]);
 
   const renderItem = ({ item }: { item: NotificationRow }) => {
     const isUnread = !item.is_read;
-    const title = item.title?.trim() || 'Thong bao moi';
-    const message = item.message?.trim() || item.body?.trim() || 'Ban co thong bao moi';
+    const title = item.title?.trim() || t('notifications.item.defaultTitle');
+    const message = item.message?.trim() || item.body?.trim() || t('notifications.item.defaultMessage');
 
     return (
       <Pressable
@@ -291,7 +294,7 @@ export default function NotificationsScreen() {
           pressed ? { opacity: 0.86 } : null,
         ]}
         accessibilityRole="button"
-        accessibilityLabel={isUnread ? 'Thông báo chưa đọc' : 'Thông báo'}
+        accessibilityLabel={isUnread ? t('notifications.item.accessibility.unread') : t('notifications.item.accessibility.read')}
       >
         <View style={{ flexDirection: 'row', gap: s(10), alignItems: 'flex-start' }}>
           <View
@@ -312,7 +315,7 @@ export default function NotificationsScreen() {
               {message}
             </Text>
             <Text style={{ color: colors.subtitle, fontWeight: '700', fontSize: s(11) }} numberOfLines={1}>
-              {formatTime(item.created_at)}
+              {formatTime(item.created_at, locale)}
             </Text>
           </View>
         </View>
@@ -332,21 +335,21 @@ export default function NotificationsScreen() {
               pressed ? { opacity: 0.85 } : null,
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Quay lại"
+            accessibilityLabel={t('notifications.back')}
           >
             <Feather name="chevron-left" size={s(24)} color={colors.title} />
           </Pressable>
 
           <View style={{ flex: 1 }}>
             <Text style={{ color: colors.title, fontWeight: '900', fontSize: s(20) }} numberOfLines={1}>
-              Thông báo
+              {t('home.notifications')}
             </Text>
             <Text style={{ color: colors.subtitle, fontWeight: '700', fontSize: s(12) }} numberOfLines={1}>
               {loading
-                ? 'Dang tai...'
+                ? t('notifications.summary.loading')
                 : notifications.length > 0
-                ? `${notifications.length} thong bao • ${unreadCount} chua doc`
-                : 'Chua co thong bao'}
+                ? t('notifications.summary.withCount', { total: notifications.length, unread: unreadCount })
+                : t('notifications.summary.empty')}
             </Text>
           </View>
 
@@ -362,10 +365,10 @@ export default function NotificationsScreen() {
               },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Danh dau tat ca da doc"
+            accessibilityLabel={t('notifications.markAllReadAccessibility')}
           >
             <Text style={{ color: colors.title, fontWeight: '800', fontSize: s(11) }}>
-              {isMarkingAll ? 'Dang cap nhat...' : 'Da doc het'}
+              {isMarkingAll ? t('notifications.markAllUpdating') : t('notifications.markAllDone')}
             </Text>
           </Pressable>
         </View>
@@ -390,9 +393,9 @@ export default function NotificationsScreen() {
             } as any}
             ListEmptyComponent={
               <View style={[styles.emptyWrap, { borderColor: colors.border, backgroundColor: colors.cardBg, borderRadius: s(18), padding: s(16) }]}>
-                <Text style={{ color: colors.title, fontWeight: '900', fontSize: s(14) }}>Chưa có thông báo</Text>
+                <Text style={{ color: colors.title, fontWeight: '900', fontSize: s(14) }}>{t('notifications.emptyTitle')}</Text>
                 <Text style={{ color: colors.subtitle, fontWeight: '700', fontSize: s(12), marginTop: s(6) }}>
-                  Khi co tuong tac moi (phan hoi danh gia, trang thai su kien...), thong bao se hien o day.
+                  {t('notifications.emptyDescription')}
                 </Text>
               </View>
             }
@@ -415,12 +418,12 @@ const normalizeType = (type?: string | null): NotificationType => {
   return 'system';
 };
 
-const formatTime = (ts?: string | null) => {
+const formatTime = (ts?: string | null, locale: string = 'vi-VN') => {
   if (!ts) return '';
   try {
     const d = new Date(ts);
     if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString('vi-VN', {
+    return d.toLocaleString(locale, {
       day: '2-digit',
       month: '2-digit',
       hour: '2-digit',

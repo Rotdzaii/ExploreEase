@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import type { EventRow } from '@/src/services/eventService';
 import { Feather } from '@expo/vector-icons';
 import React, { useMemo, useState } from 'react';
@@ -40,27 +41,49 @@ const BASE_CATEGORIES = ['all', 'Music', 'Food', 'Wellness', 'Art', 'Sports', 'T
 const FALLBACK_EVENT_IMAGE =
   'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?auto=format&fit=crop&w=1400&q=80';
 
-const toDisplayDateTime = (iso: string) => {
+type TranslateFn = (key: string, params?: Record<string, string | number>) => string;
+
+const toDisplayDateTime = (iso: string, locale: string, t: TranslateFn) => {
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return 'Không rõ thời gian';
+  if (Number.isNaN(d.getTime())) return t('events.discovery.unknownTime');
 
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const yyyy = d.getFullYear();
-  const hh = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
-  return `${dd}/${mm}/${yyyy} • ${hh}:${min}`;
+  const dateText = d.toLocaleDateString(locale, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  const timeText = d.toLocaleTimeString(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `${dateText} • ${timeText}`;
 };
 
-const toDisplayPrice = (price: number) => {
-  if (price <= 0) return 'FREE';
-  return `${price.toLocaleString('vi-VN')} đ`;
+const toDisplayPrice = (price: number, locale: string, t: TranslateFn) => {
+  if (price <= 0) return t('common.free');
+  return `${price.toLocaleString(locale)} ${t('common.currencyVndShort')}`;
 };
 
-const toStatusLabel = (status: EventRow['status']) => {
-  if (status === 'ongoing') return 'Đang diễn ra';
-  if (status === 'completed') return 'Đã kết thúc';
-  return 'Sắp diễn ra';
+const toStatusLabel = (status: EventRow['status'], t: TranslateFn) => {
+  if (status === 'ongoing') return t('event.status.ongoing');
+  if (status === 'completed') return t('event.status.completed');
+  return t('event.status.incoming');
+};
+
+const toCategoryLabel = (category: string, t: TranslateFn) => {
+  const normalized = category.trim().toLowerCase();
+  if (normalized === 'all') return t('common.all');
+  if (normalized === 'music') return t('events.category.music');
+  if (normalized === 'food') return t('events.category.food');
+  if (normalized === 'wellness') return t('events.category.wellness');
+  if (normalized === 'art') return t('events.category.art');
+  if (normalized === 'sports') return t('events.category.sports');
+  if (normalized === 'tech') return t('events.category.tech');
+  if (normalized === 'education') return t('events.category.education');
+  if (normalized === 'entertainment') return t('events.category.entertainment');
+  if (normalized === 'networking') return t('events.category.networking');
+  if (normalized === 'charity') return t('events.category.charity');
+  return category;
 };
 
 export function EventDiscoveryList({
@@ -81,6 +104,8 @@ export function EventDiscoveryList({
 }: EventDiscoveryListProps) {
   const { width } = useWindowDimensions();
   const { isDark } = useTheme();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'vi-VN';
   const [showFilters, setShowFilters] = useState(false);
 
   const isWide = width >= 900;
@@ -135,8 +160,8 @@ export function EventDiscoveryList({
     >
       <View style={styles.headerWrap}>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.headerTitle, { color: colors.title }]}>Discover Events</Text>
-          <Text style={[styles.headerSubtitle, { color: colors.muted }]}>Find and attend amazing events near you</Text>
+          <Text style={[styles.headerTitle, { color: colors.title }]}>{t('events.discovery.title')}</Text>
+          <Text style={[styles.headerSubtitle, { color: colors.muted }]}>{t('events.discovery.subtitle')}</Text>
         </View>
 
         <Pressable
@@ -149,7 +174,7 @@ export function EventDiscoveryList({
           accessibilityRole="button"
         >
           <Feather name="plus" size={16} color="#001018" />
-          <Text style={styles.createBtnText}>Create</Text>
+          <Text style={styles.createBtnText}>{t('explore.createEvent')}</Text>
         </Pressable>
       </View>
 
@@ -169,7 +194,7 @@ export function EventDiscoveryList({
             accessibilityRole="button"
           >
             <Feather name="filter" size={15} color={ExploreEaseColors.primary} />
-            <Text style={styles.filterToggleText}>Filters</Text>
+            <Text style={styles.filterToggleText}>{t('common.filter')}</Text>
             {isFiltered ? (
               <View style={styles.filterCountPill}>
                 <Text style={styles.filterCountText}>{activeFilterCount}</Text>
@@ -188,7 +213,7 @@ export function EventDiscoveryList({
               accessibilityRole="button"
             >
               <Feather name="x" size={14} color={colors.muted} />
-              <Text style={[styles.resetText, { color: colors.muted }]}>Reset</Text>
+              <Text style={[styles.resetText, { color: colors.muted }]}>{t('common.reset')}</Text>
             </Pressable>
           ) : null}
         </View>
@@ -196,11 +221,11 @@ export function EventDiscoveryList({
         {showFilters ? (
           <View style={[styles.filterOptions, { borderColor: colors.border }]}>
             <View>
-              <Text style={[styles.filterLabel, { color: colors.title }]}>Category</Text>
+              <Text style={[styles.filterLabel, { color: colors.title }]}>{t('explore.filter.category')}</Text>
               <View style={styles.filterChipWrap}>
                 {categories.map((category) => {
                   const isSelected = selectedCategory.toLowerCase() === category.toLowerCase();
-                  const label = category === 'all' ? 'All' : category;
+                  const label = toCategoryLabel(category, t);
 
                   return (
                     <Pressable
@@ -225,11 +250,11 @@ export function EventDiscoveryList({
             </View>
 
             <View>
-              <Text style={[styles.filterLabel, { color: colors.title }]}>Price</Text>
+              <Text style={[styles.filterLabel, { color: colors.title }]}>{t('explore.filter.price')}</Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {(['all', 'free', 'paid'] as const).map((value) => {
                   const isSelected = priceFilter === value;
-                  const label = value === 'all' ? 'All' : value === 'free' ? 'Free' : 'Paid';
+                  const label = value === 'all' ? t('common.all') : value === 'free' ? t('common.free') : t('common.paid');
 
                   return (
                     <Pressable
@@ -259,7 +284,7 @@ export function EventDiscoveryList({
       {loading ? (
         <View style={styles.stateWrap}>
           <ActivityIndicator color={ExploreEaseColors.primary} />
-          <Text style={[styles.stateText, { color: colors.muted }]}>Loading events...</Text>
+          <Text style={[styles.stateText, { color: colors.muted }]}>{t('explore.loadingResults')}</Text>
         </View>
       ) : errorMessage ? (
         <View style={styles.stateWrap}>
@@ -267,7 +292,7 @@ export function EventDiscoveryList({
         </View>
       ) : events.length === 0 ? (
         <View style={styles.stateWrap}>
-          <Text style={[styles.stateText, { color: colors.muted }]}>No events found. Try adjusting your filters.</Text>
+          <Text style={[styles.stateText, { color: colors.muted }]}>{t('events.discovery.empty')}</Text>
         </View>
       ) : (
         <View style={styles.gridWrap}>
@@ -323,7 +348,7 @@ export function EventDiscoveryList({
 
                   <View style={[styles.priceBadge, free ? styles.freeBadge : null]}>
                     {!free ? <Feather name="dollar-sign" size={12} color="#ffffff" /> : null}
-                    <Text style={[styles.priceText, free ? { color: '#001018' } : null]}>{toDisplayPrice(Number(event.price ?? 0))}</Text>
+                    <Text style={[styles.priceText, free ? { color: '#001018' } : null]}>{toDisplayPrice(Number(event.price ?? 0), locale, t)}</Text>
                   </View>
                 </View>
 
@@ -335,7 +360,7 @@ export function EventDiscoveryList({
                   <View style={styles.metaRow}>
                     <Feather name="calendar" size={14} color={ExploreEaseColors.primary} />
                     <Text style={[styles.metaText, { color: colors.muted }]} numberOfLines={1}>
-                      {toDisplayDateTime(event.start_time)}
+                      {toDisplayDateTime(event.start_time, locale, t)}
                     </Text>
                   </View>
 
@@ -348,7 +373,7 @@ export function EventDiscoveryList({
 
                   <View style={[styles.footerRow, { borderColor: colors.border }]}>
                     <View style={styles.statusPill}>
-                      <Text style={styles.statusText}>{toStatusLabel(event.status)}</Text>
+                      <Text style={styles.statusText}>{toStatusLabel(event.status, t)}</Text>
                     </View>
 
                     <Pressable
@@ -359,7 +384,7 @@ export function EventDiscoveryList({
                       style={({ pressed: btnPressed }) => [styles.viewBtn, btnPressed ? { opacity: 0.84 } : null]}
                       accessibilityRole="button"
                     >
-                      <Text style={styles.viewBtnText}>View</Text>
+                      <Text style={styles.viewBtnText}>{t('common.view')}</Text>
                     </Pressable>
                   </View>
                 </View>

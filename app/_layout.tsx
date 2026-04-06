@@ -4,6 +4,7 @@ import { useProtectedRoute } from '@/hooks/useProtectedRoute';
 import { AuthProvider } from '@/src/context/auth';
 import { CurrencyProvider } from '@/src/context/currency';
 import { ThemeProvider } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { initializeLocalNotificationsAsync } from '@/src/services/localNotificationService';
 import { offlineSyncService } from '@/src/services/offlineSyncService';
 import { useLanguageStore } from '@/src/store/useLanguageStore';
@@ -34,6 +35,7 @@ function AuthRouteGate() {
 export default function RootLayout() {
   const initializeLanguage = useLanguageStore((s) => s.initializeLanguage);
   const addNotification = useNotificationStore((s) => s.addNotification);
+  const { t } = useI18n();
   const { isOnline } = useNetwork();
 
   useEffect(() => {
@@ -53,7 +55,7 @@ export default function RootLayout() {
 
         if (result.syncedCount > 0) {
           addNotification({
-            message: `Synced ${result.syncedCount} pending review(s).`,
+            message: t('sync.pendingReviews', { count: result.syncedCount }),
             type: 'success',
             durationMs: 3200,
           });
@@ -69,7 +71,7 @@ export default function RootLayout() {
     return () => {
       cancelled = true;
     };
-  }, [addNotification, isOnline]);
+  }, [addNotification, isOnline, t]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

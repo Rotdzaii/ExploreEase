@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { ExploreEaseColors } from '../../constants/exploreEaseTheme';
+import { useI18n } from '../../src/i18n/useI18n';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -31,6 +32,7 @@ type PopularDestinationsProps = {
 };
 
 export function PopularDestinations({ styles, destinations }: PopularDestinationsProps) {
+  const { t } = useI18n();
   const { width: screenWidth } = useWindowDimensions();
 
   const scale = clamp(screenWidth / 390, 0.86, 1.18);
@@ -141,7 +143,7 @@ export function PopularDestinations({ styles, destinations }: PopularDestination
                 },
               } as any)}
               style={styles.popularFavBtn}
-              accessibilityLabel={isFav ? 'Bỏ yêu thích' : 'Yêu thích'}
+              accessibilityLabel={isFav ? t('home.unfavorite') : t('home.favorite')}
             >
               <MaterialCommunityIcons
                 name={isFav ? 'heart' : 'heart-outline'}
@@ -158,7 +160,7 @@ export function PopularDestinations({ styles, destinations }: PopularDestination
               ]}
               onPress={() => toggleFavorite(destination.id)}
               accessibilityRole="button"
-              accessibilityLabel={isFav ? 'Bỏ yêu thích' : 'Yêu thích'}
+              accessibilityLabel={isFav ? t('home.unfavorite') : t('home.favorite')}
             >
               <MaterialCommunityIcons
                 name={isFav ? 'heart' : 'heart-outline'}
@@ -185,8 +187,8 @@ export function PopularDestinations({ styles, destinations }: PopularDestination
   return (
     <View style={styles.popularSection}>
       <View style={styles.popularHeader}>
-        <Text style={styles.popularHeading}>Popular Destinations</Text>
-        <Text style={styles.popularSubheading}>Trending places everyone loves</Text>
+        <Text style={styles.popularHeading}>{t('home.popularDestinations')}</Text>
+        <Text style={styles.popularSubheading}>{t('home.popularSubtitle')}</Text>
       </View>
 
       <FlatList

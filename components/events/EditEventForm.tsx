@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { Feather } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -53,6 +54,7 @@ const toDateTime = (dateText: string, timeText: string): Date | null => {
 
 export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCancel }: EditEventFormProps) {
   const { isDark } = useTheme();
+  const { t } = useI18n();
   const [formData, setFormData] = useState<EventEditData>(initialData);
   const [errors, setErrors] = useState<Partial<Record<keyof EventEditData, string>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -80,6 +82,22 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
 
   const isFreeEvent = formData.price.trim() === '' || Number(formData.price) <= 0;
 
+  const categoryLabels = useMemo(
+    () => ({
+      Music: t('events.category.music'),
+      Food: t('events.category.food'),
+      Wellness: t('events.category.wellness'),
+      Art: t('events.category.art'),
+      Sports: t('events.category.sports'),
+      Tech: t('events.category.tech'),
+      Education: t('events.category.education'),
+      Entertainment: t('events.category.entertainment'),
+      Networking: t('events.category.networking'),
+      Charity: t('events.category.charity'),
+    }),
+    [t]
+  );
+
   const setField = <K extends keyof EventEditData>(key: K, value: EventEditData[K]) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
     if (errors[key]) {
@@ -90,24 +108,24 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
   const validateForm = (): boolean => {
     const nextErrors: Partial<Record<keyof EventEditData, string>> = {};
 
-    if (!formData.title.trim()) nextErrors.title = 'Title is required';
-    if (!formData.category.trim()) nextErrors.category = 'Category is required';
-    if (!formData.location.trim()) nextErrors.location = 'Location is required';
+    if (!formData.title.trim()) nextErrors.title = t('events.form.validation.titleRequired');
+    if (!formData.category.trim()) nextErrors.category = t('events.form.validation.categoryRequired');
+    if (!formData.location.trim()) nextErrors.location = t('events.form.validation.locationRequired');
 
-    if (!isDateText(formData.startDate)) nextErrors.startDate = 'Use format YYYY-MM-DD';
-    if (!isTimeText(formData.startTime)) nextErrors.startTime = 'Use format HH:mm';
-    if (!isDateText(formData.endDate)) nextErrors.endDate = 'Use format YYYY-MM-DD';
-    if (!isTimeText(formData.endTime)) nextErrors.endTime = 'Use format HH:mm';
+    if (!isDateText(formData.startDate)) nextErrors.startDate = t('events.form.validation.dateFormat');
+    if (!isTimeText(formData.startTime)) nextErrors.startTime = t('events.form.validation.timeFormat');
+    if (!isDateText(formData.endDate)) nextErrors.endDate = t('events.form.validation.dateFormat');
+    if (!isTimeText(formData.endTime)) nextErrors.endTime = t('events.form.validation.timeFormat');
 
     const price = Number(formData.price || '0');
     if (Number.isNaN(price) || price < 0) {
-      nextErrors.price = 'Price must be >= 0';
+      nextErrors.price = t('events.form.validation.priceNonNegative');
     }
 
     const start = toDateTime(formData.startDate, formData.startTime);
     const end = toDateTime(formData.endDate, formData.endTime);
     if (start && end && end <= start) {
-      nextErrors.endTime = 'End time must be greater than start time';
+      nextErrors.endTime = t('events.form.validation.endAfterStart');
     }
 
     setErrors(nextErrors);
@@ -140,14 +158,14 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
     <View style={[styles.safe, { backgroundColor: colors.background }]}> 
       <View style={[styles.header, { borderColor: colors.border }]}> 
         <View style={{ flex: 1 }}>
-          <Text style={[styles.headerTitle, { color: colors.title }]}>Edit Event</Text>
-          <Text style={[styles.headerSubtitle, { color: colors.muted }]}>Update event details</Text>
+          <Text style={[styles.headerTitle, { color: colors.title }]}>{t('events.form.editTitle')}</Text>
+          <Text style={[styles.headerSubtitle, { color: colors.muted }]}>{t('events.form.editSubtitle')}</Text>
         </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-          <Text style={[styles.label, { color: colors.title }]}>Event Image URL</Text>
+          <Text style={[styles.label, { color: colors.title }]}>{t('events.form.imageUrl')}</Text>
           <View style={styles.imagePreviewWrap}>
             <Image source={{ uri: imageSourceUri }} style={styles.imagePreview} resizeMode="cover" />
             {!!formData.imageUrl.trim() ? (
@@ -164,18 +182,18 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
           <TextInput
             value={formData.imageUrl}
             onChangeText={(value) => setField('imageUrl', value)}
-            placeholder="https://example.com/event-image.jpg"
+            placeholder={t('events.form.imageUrlPlaceholder')}
             placeholderTextColor={colors.muted}
             autoCapitalize="none"
             autoCorrect={false}
             style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.inputText }]}
           />
 
-          <Text style={[styles.label, { color: colors.title }]}>Event Title</Text>
+          <Text style={[styles.label, { color: colors.title }]}>{t('events.form.title')}</Text>
           <TextInput
             value={formData.title}
             onChangeText={(value) => setField('title', value)}
-            placeholder="e.g., Summer Music Festival"
+            placeholder={t('events.form.titlePlaceholder')}
             placeholderTextColor={colors.muted}
             style={[
               styles.input,
@@ -188,7 +206,7 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
           />
           {errors.title ? <Text style={[styles.errorText, { color: colors.error }]}>{errors.title}</Text> : null}
 
-          <Text style={[styles.label, { color: colors.title }]}>Category</Text>
+          <Text style={[styles.label, { color: colors.title }]}>{t('events.form.category')}</Text>
           <View style={styles.categoryWrap}>
             {CATEGORIES.map((category) => {
               const selected = formData.category === category;
@@ -206,18 +224,18 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
                   ]}
                   accessibilityRole="button"
                 >
-                  <Text style={[styles.categoryChipText, { color: selected ? '#001018' : colors.body }]}>{category}</Text>
+                  <Text style={[styles.categoryChipText, { color: selected ? '#001018' : colors.body }]}>{categoryLabels[category as keyof typeof categoryLabels] ?? category}</Text>
                 </Pressable>
               );
             })}
           </View>
           {errors.category ? <Text style={[styles.errorText, { color: colors.error }]}>{errors.category}</Text> : null}
 
-          <Text style={[styles.label, { color: colors.title }]}>Location</Text>
+          <Text style={[styles.label, { color: colors.title }]}>{t('events.form.location')}</Text>
           <TextInput
             value={formData.location}
             onChangeText={(value) => setField('location', value)}
-            placeholder="City, venue or address"
+            placeholder={t('events.form.locationPlaceholder')}
             placeholderTextColor={colors.muted}
             style={[
               styles.input,
@@ -232,11 +250,11 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
 
           <View style={styles.row}>
             <View style={styles.halfCol}>
-              <Text style={[styles.label, { color: colors.title }]}>Start Date</Text>
+              <Text style={[styles.label, { color: colors.title }]}>{t('events.form.startDate')}</Text>
               <TextInput
                 value={formData.startDate}
                 onChangeText={(value) => setField('startDate', value)}
-                placeholder="YYYY-MM-DD"
+                placeholder={t('events.form.datePlaceholder')}
                 placeholderTextColor={colors.muted}
                 style={[
                   styles.input,
@@ -251,11 +269,11 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
             </View>
 
             <View style={styles.halfCol}>
-              <Text style={[styles.label, { color: colors.title }]}>Start Time</Text>
+              <Text style={[styles.label, { color: colors.title }]}>{t('events.form.startTime')}</Text>
               <TextInput
                 value={formData.startTime}
                 onChangeText={(value) => setField('startTime', value)}
-                placeholder="HH:mm"
+                placeholder={t('events.form.timePlaceholder')}
                 placeholderTextColor={colors.muted}
                 style={[
                   styles.input,
@@ -272,11 +290,11 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
 
           <View style={styles.row}>
             <View style={styles.halfCol}>
-              <Text style={[styles.label, { color: colors.title }]}>End Date</Text>
+              <Text style={[styles.label, { color: colors.title }]}>{t('events.form.endDate')}</Text>
               <TextInput
                 value={formData.endDate}
                 onChangeText={(value) => setField('endDate', value)}
-                placeholder="YYYY-MM-DD"
+                placeholder={t('events.form.datePlaceholder')}
                 placeholderTextColor={colors.muted}
                 style={[
                   styles.input,
@@ -291,11 +309,11 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
             </View>
 
             <View style={styles.halfCol}>
-              <Text style={[styles.label, { color: colors.title }]}>End Time</Text>
+              <Text style={[styles.label, { color: colors.title }]}>{t('events.form.endTime')}</Text>
               <TextInput
                 value={formData.endTime}
                 onChangeText={(value) => setField('endTime', value)}
-                placeholder="HH:mm"
+                placeholder={t('events.form.timePlaceholder')}
                 placeholderTextColor={colors.muted}
                 style={[
                   styles.input,
@@ -310,11 +328,11 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
             </View>
           </View>
 
-          <Text style={[styles.label, { color: colors.title }]}>Price (0 for free)</Text>
+          <Text style={[styles.label, { color: colors.title }]}>{t('events.form.priceLabel')}</Text>
           <TextInput
             value={formData.price}
             onChangeText={(value) => setField('price', value)}
-            placeholder="0"
+            placeholder={t('events.form.pricePlaceholder')}
             placeholderTextColor={colors.muted}
             keyboardType="decimal-pad"
             style={[
@@ -329,15 +347,15 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
           {errors.price ? <Text style={[styles.errorText, { color: colors.error }]}>{errors.price}</Text> : null}
           {isFreeEvent ? (
             <Text style={{ color: ExploreEaseColors.primary, fontSize: 12, fontWeight: '700', marginTop: 4 }}>
-              This event is free
+              {t('events.form.freeHint')}
             </Text>
           ) : null}
 
-          <Text style={[styles.label, { color: colors.title }]}>Description (Optional)</Text>
+          <Text style={[styles.label, { color: colors.title }]}>{t('events.form.description')}</Text>
           <TextInput
             value={formData.description}
             onChangeText={(value) => setField('description', value)}
-            placeholder="Tell us more about your event..."
+            placeholder={t('events.form.descriptionPlaceholder')}
             placeholderTextColor={colors.muted}
             multiline
             textAlignVertical="top"
@@ -364,7 +382,7 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
               ]}
               accessibilityRole="button"
             >
-              <Text style={[styles.cancelBtnText, { color: colors.body }]}>Cancel</Text>
+              <Text style={[styles.cancelBtnText, { color: colors.body }]}>{t('common.cancel')}</Text>
             </Pressable>
 
             <Pressable
@@ -377,7 +395,7 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
               ]}
               accessibilityRole="button"
             >
-              {isSubmitting ? <ActivityIndicator color="#001018" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
+              {isSubmitting ? <ActivityIndicator color="#001018" /> : <Text style={styles.saveBtnText}>{t('events.form.saveChanges')}</Text>}
             </Pressable>
           </View>
 
@@ -396,7 +414,7 @@ export function EditEventForm({ eventId, initialData, onSubmit, onDelete, onCanc
             ) : (
               <View style={styles.deleteBtnInner}>
                 <Feather name="trash-2" size={16} color="#ffffff" />
-                <Text style={styles.deleteBtnText}>Delete Event</Text>
+                <Text style={styles.deleteBtnText}>{t('events.form.deleteEvent')}</Text>
               </View>
             )}
           </Pressable>

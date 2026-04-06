@@ -1,4 +1,5 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import React, { useState } from 'react';
@@ -22,7 +23,7 @@ type SearchBarProps = {
 export function SearchBar({
   styles,
   isDarkMode,
-  placeholder = 'Where to explore?',
+  placeholder,
   value,
   onChangeText,
   onPressFilters,
@@ -31,9 +32,11 @@ export function SearchBar({
   onPressVoiceSearch,
   disableVoiceSearch = false,
 }: SearchBarProps) {
+  const { t } = useI18n();
   const [focused, setFocused] = useState(false);
   const isRecording = voiceSearchState === 'recording';
   const isProcessing = voiceSearchState === 'processing';
+  const resolvedPlaceholder = placeholder ?? t('home.searchPlaceholder');
 
   return (
     <View style={styles.searchContainer}>
@@ -51,7 +54,7 @@ export function SearchBar({
           <TextInput
             value={value}
             onChangeText={onChangeText}
-            placeholder={placeholder}
+            placeholder={resolvedPlaceholder}
             placeholderTextColor={isDarkMode ? 'rgba(148, 163, 184, 0.6)' : 'rgba(100, 116, 139, 0.6)'}
             style={styles.searchInput}
             onFocus={() => setFocused(true)}
@@ -75,7 +78,7 @@ export function SearchBar({
               onPress={onPressVoiceSearch}
               disabled={disableVoiceSearch}
               accessibilityRole="button"
-              accessibilityLabel={isRecording ? 'Stop voice search' : 'Start voice search'}
+              accessibilityLabel={isRecording ? t('home.voice.stop') : t('home.voice.start')}
             >
               {isProcessing ? (
                 <ActivityIndicator size="small" color={ExploreEaseColors.primary} />
@@ -97,6 +100,7 @@ export function SearchBar({
             ]}
             onPress={onPressFilters}
             accessibilityRole="button"
+            accessibilityLabel={t('common.filter')}
           >
             <MaterialCommunityIcons
               name="tune-variant"

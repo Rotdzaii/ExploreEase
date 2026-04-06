@@ -1,18 +1,21 @@
+import { useI18n } from '@/src/i18n/useI18n';
 import { router } from 'expo-router'; //
 import React, { useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../src/services/supabase';
 
-const INTERESTS_DATA = [
-  { id: 'Food', label: 'Ẩm thực' },
-  { id: 'Culture', label: 'Văn hóa' },
-  { id: 'Shopping', label: 'Mua sắm' },
-  { id: 'Nature', label: 'Thiên nhiên' },
-  { id: 'Adventure', label: 'Phiêu lưu' },
-  { id: 'History', label: 'Lịch sử' }
-];
-
 export default function InterestsScreen() {
+  const { t } = useI18n();
+
+  const INTERESTS_DATA = [
+    { id: 'Food', label: t('profile.interests.food') },
+    { id: 'Culture', label: t('profile.interests.culture') },
+    { id: 'Shopping', label: t('profile.interests.shopping') },
+    { id: 'Nature', label: t('profile.interests.nature') },
+    { id: 'Adventure', label: t('profile.interests.adventure') },
+    { id: 'History', label: t('profile.interests.history') },
+  ];
+
   // Sửa lỗi TS: Khai báo kiểu string[] cho mảng selected
   const [selected, setSelected] = useState<string[]>([]);
 
@@ -24,7 +27,7 @@ export default function InterestsScreen() {
 
   const handleStartExploring = async () => {
     if (selected.length < 3) {
-      Alert.alert("Thông báo", "Vui lòng chọn ít nhất 3 sở thích để chúng tôi gợi ý tốt hơn!");
+      Alert.alert(t('common.notification'), t('auth.interests.minSelectionMessage'));
       return;
     }
 
@@ -32,7 +35,7 @@ export default function InterestsScreen() {
     
     // Sửa lỗi TS: Kiểm tra user có tồn tại không trước khi lấy id
     if (!user) {
-        Alert.alert("Lỗi", "Không tìm thấy thông tin đăng nhập");
+      Alert.alert(t('auth.profileSetup.errorTitle'), t('auth.interests.errorMissingAuth'));
         return;
     }
 
@@ -41,17 +44,19 @@ export default function InterestsScreen() {
       .update({ interests: selected })
       .eq('id', user.id);
 
-    if (error) Alert.alert("Lỗi", "Không thể lưu sở thích");
+    if (error) Alert.alert(t('auth.profileSetup.errorTitle'), t('auth.interests.errorSaveInterests'));
     else {
-        Alert.alert("Thành công", "Bắt đầu khám phá ExploreEase ngay thôi!");
+        Alert.alert(t('auth.interests.successTitle'), t('auth.interests.successMessage'));
         router.replace('/(tabs)/explore' as any); //
     }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Hãy cho chúng tôi biết bạn <Text style={{color: '#0d7ff2'}}>thích gì</Text></Text>
-      <Text style={styles.subtitle}>Chúng tôi sẽ tùy chỉnh bảng tin ExploreEase dựa trên lựa chọn của bạn.</Text>
+      <Text style={styles.title}>
+        {t('auth.interests.titlePrefix')} <Text style={{ color: '#0d7ff2' }}>{t('auth.interests.titleHighlight')}</Text>
+      </Text>
+      <Text style={styles.subtitle}>{t('auth.interests.subtitle')}</Text>
 
       <FlatList 
         data={INTERESTS_DATA}
@@ -70,7 +75,7 @@ export default function InterestsScreen() {
       />
 
       <TouchableOpacity style={styles.startBtn} onPress={handleStartExploring}>
-        <Text style={styles.startBtnText}>Bắt đầu khám phá</Text>
+        <Text style={styles.startBtnText}>{t('auth.interests.startExploring')}</Text>
       </TouchableOpacity>
     </View>
   );

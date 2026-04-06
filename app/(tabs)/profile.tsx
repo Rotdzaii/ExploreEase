@@ -2,7 +2,9 @@ import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import { adminService } from '@/src/services/adminService';
+import { itineraryService } from '@/src/services/itineraryService';
 import { profileService } from '@/src/services/profileService';
+import { reviewService } from '@/src/services/reviewService';
 import { supabase } from '@/src/services/supabase';
 import { useLanguageStore } from '@/src/store/useLanguageStore';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
@@ -17,45 +19,96 @@ export default function ProfileScreen() {
   const { language, t } = useI18n();
   const setLanguage = useLanguageStore((s) => s.setLanguage);
 
-  const [profileName, setProfileName] = React.useState<string>('Nguyên');
-  const [nationality, setNationality] = React.useState<string>('Việt Nam');
+  const [profileName, setProfileName] = React.useState<string>('');
+  const [nationality, setNationality] = React.useState<string>('');
   const [nationalityCode, setNationalityCode] = React.useState<string>('VN');
+  const [interests, setInterests] = React.useState<string[]>([]);
+  const [tripCount, setTripCount] = React.useState<number>(0);
+  const [reviewCount, setReviewCount] = React.useState<number>(0);
+  const [loadingStats, setLoadingStats] = React.useState<boolean>(true);
   const [isAdmin, setIsAdmin] = React.useState(false);
   const [languageModalVisible, setLanguageModalVisible] = React.useState(false);
+
+  const toInterestLabel = React.useCallback((value: string) => {
+    const normalized = value.trim().toLowerCase();
+
+    if (!normalized) return '';
+    if (normalized.includes('food') || normalized.includes('ẩm thực')) return t('profile.interests.food');
+    if (normalized.includes('nature') || normalized.includes('thiên nhiên')) return t('profile.interests.nature');
+    if (normalized.includes('adventure') || normalized.includes('phiêu lưu')) return t('profile.interests.adventure');
+    if (normalized.includes('culture') || normalized.includes('văn hóa')) return t('profile.interests.culture');
+    if (normalized.includes('shopping') || normalized.includes('mua sắm')) return t('profile.interests.shopping');
+    if (normalized.includes('history') || normalized.includes('lịch sử')) return t('profile.interests.history');
+
+    return value.trim();
+  }, [t]);
+
+  const toInterestIcon = React.useCallback((value: string): React.ComponentProps<typeof Feather>['name'] => {
+    const normalized = value.trim().toLowerCase();
+
+    if (normalized.includes('food') || normalized.includes('ẩm thực')) return 'coffee';
+    if (normalized.includes('nature') || normalized.includes('thiên nhiên')) return 'feather';
+    if (normalized.includes('adventure') || normalized.includes('phiêu lưu')) return 'zap';
+    if (normalized.includes('culture') || normalized.includes('văn hóa')) return 'globe';
+    if (normalized.includes('shopping') || normalized.includes('mua sắm')) return 'shopping-bag';
+    if (normalized.includes('history') || normalized.includes('lịch sử')) return 'book-open';
+
+    return 'tag';
+  }, []);
+
+  const displayInterests = React.useMemo(
+    () => interests.map(toInterestLabel).filter(Boolean),
+    [interests, toInterestLabel]
+  );
+
+  const resolvedProfileName = profileName.trim() || t('profile.defaultName');
+  const resolvedNationality = nationality.trim() || t('profile.defaultNationality');
 
   React.useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const [profile, hasAdminRole] = await Promise.all([
+        const [profileResult, hasAdminRoleResult, tripCountResult, reviewCountResult] = await Promise.allSettled([
           profileService.getCurrentProfile(),
-          adminService.isCurrentUserAdmin().catch(() => false),
+          adminService.isCurrentUserAdmin(),
+          itineraryService.countTripsForCurrentUser(),
+          reviewService.countReviewsForCurrentUser(),
         ]);
 
         if (!alive) return;
 
-        setIsAdmin(hasAdminRole);
+        setIsAdmin(hasAdminRoleResult.status === 'fulfilled' ? hasAdminRoleResult.value : false);
+        setTripCount(tripCountResult.status === 'fulfilled' ? tripCountResult.value : 0);
+        setReviewCount(reviewCountResult.status === 'fulfilled' ? reviewCountResult.value : 0);
+        setLoadingStats(false);
+
+        const profile = profileResult.status === 'fulfilled' ? profileResult.value : null;
         if (!profile) return;
 
         const normalizedName = typeof profile.full_name === 'string' && profile.full_name.trim()
           ? profile.full_name.trim()
-          : 'Nguyên';
+          : '';
 
         const rawNationality = (profile.nationality ?? '').toString().trim();
-        const normalizedNationality = rawNationality === 'VN' || rawNationality.toLowerCase() === 'việt nam'
-          ? 'Việt Nam'
-          : (rawNationality || 'Việt Nam');
+        const normalizedNationality = rawNationality.toUpperCase() === 'VN'
+          ? t('profile.defaultNationality')
+          : rawNationality;
 
-        const normalizedNationalityCode = rawNationality.toUpperCase() === 'VN' || rawNationality.toLowerCase() === 'việt nam'
+        const normalizedNationalityCode = rawNationality.toUpperCase() === 'VN'
           ? 'VN'
-          : (rawNationality.length === 2 ? rawNationality.toUpperCase() : 'US');
+          : (rawNationality.length === 2 ? rawNationality.toUpperCase() : 'VN');
 
         setProfileName(normalizedName);
         setNationality(normalizedNationality);
         setNationalityCode(normalizedNationalityCode);
+        setInterests(Array.isArray(profile.interests) ? profile.interests : []);
       } catch {
         setIsAdmin(false);
-        // keep fallbacks
+        setTripCount(0);
+        setReviewCount(0);
+        setInterests([]);
+      } finally {
+        setLoadingStats(false);
       }
     };
 
@@ -63,7 +116,7 @@ export default function ProfileScreen() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [t]);
 
   const colors = useMemo(
     () => ({
@@ -81,7 +134,7 @@ export default function ProfileScreen() {
     [isDark]
   );
 
-  const currencyLabel = nationalityCode === 'VN' ? 'VNĐ' : 'USD';
+  const currencyLabel = nationalityCode === 'VN' ? t('profile.currency.vnd') : t('profile.currency.usd');
 
   const handleEditProfile = React.useCallback(() => {
     router.push('/profile-setup');
@@ -102,25 +155,25 @@ export default function ProfileScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.container}>
-          <Text style={[styles.pageTitle, { color: colors.title }]}>Hồ sơ</Text>
-          <Text style={[styles.pageSubtitle, { color: colors.subtitle }]}>Quản lý thông tin cá nhân và cài đặt</Text>
+          <Text style={[styles.pageTitle, { color: colors.title }]}>{t('profile.title')}</Text>
+          <Text style={[styles.pageSubtitle, { color: colors.subtitle }]}>{t('profile.subtitle')}</Text>
 
           {/* Profile header */}
           <View style={[styles.profileCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
             <View style={styles.profileLeft}>
               <View style={[styles.avatarWrap, { borderColor: colors.border }]}>
                 <Image
-                  source={{ uri: `https://api.dicebear.com/7.x/avataaars/png?seed=${encodeURIComponent(profileName)}` }}
+                  source={{ uri: `https://api.dicebear.com/7.x/avataaars/png?seed=${encodeURIComponent(resolvedProfileName)}` }}
                   style={styles.avatar}
                 />
               </View>
 
               <View style={{ flex: 1 }}>
                 <Text style={[styles.profileName, { color: colors.title }]} numberOfLines={1}>
-                  {profileName}
+                  {resolvedProfileName}
                 </Text>
                 <Text style={[styles.profileMeta, { color: colors.subtitle }]} numberOfLines={1}>
-                  {nationality}
+                  {resolvedNationality}
                 </Text>
               </View>
             </View>
@@ -132,50 +185,47 @@ export default function ProfileScreen() {
                 { borderColor: colors.border, backgroundColor: colors.cardBg, opacity: pressed ? 0.85 : 1 },
               ]}
               accessibilityRole="button"
-              accessibilityLabel="Chỉnh sửa hồ sơ"
+              accessibilityLabel={t('profile.edit')}
             >
               <Feather name="edit-2" size={18} color={colors.title} />
             </Pressable>
           </View>
 
-          {/* Interests */}
-          <Text style={[styles.blockTitle, { color: colors.title }]}>Sở thích của tôi</Text>
-          <View style={styles.chipsRow}>
-            <View style={[styles.chip, { borderColor: colors.chipBorder, backgroundColor: colors.cardBg }]}>
-              <Feather name="coffee" size={16} color={colors.title} />
-              <Text style={[styles.chipText, { color: colors.title }]}>Ẩm thực</Text>
-            </View>
-            <View style={[styles.chip, { borderColor: colors.chipBorder, backgroundColor: colors.cardBg }]}>
-              <Feather name="feather" size={16} color={colors.title} />
-              <Text style={[styles.chipText, { color: colors.title }]}>Thiên nhiên</Text>
-            </View>
-            <View style={[styles.chip, { borderColor: colors.chipBorder, backgroundColor: colors.cardBg }]}>
-              <Feather name="zap" size={16} color={colors.title} />
-              <Text style={[styles.chipText, { color: colors.title }]}>Phiêu lưu</Text>
-            </View>
-          </View>
+          {displayInterests.length > 0 ? (
+            <>
+              <Text style={[styles.blockTitle, { color: colors.title }]}>{t('profile.interests.title')}</Text>
+              <View style={styles.chipsRow}>
+                {displayInterests.map((item) => (
+                  <View key={item} style={[styles.chip, { borderColor: colors.chipBorder, backgroundColor: colors.cardBg }]}>
+                    <Feather name={toInterestIcon(item)} size={16} color={colors.title} />
+                    <Text style={[styles.chipText, { color: colors.title }]}>{item}</Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : null}
 
           {/* Stats */}
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { backgroundColor: colors.statCardBg, borderColor: colors.border }]}>
               <View style={styles.statTop}>
                 <Feather name="map-pin" size={16} color={colors.title} />
-                <Text style={[styles.statLabel, { color: colors.subtitle }]}>CHUYẾN ĐI ĐÃ LƯU</Text>
+                <Text style={[styles.statLabel, { color: colors.subtitle }]}>{t('profile.stats.savedTrips')}</Text>
               </View>
-              <Text style={[styles.statValue, { color: colors.title }]}>12</Text>
+              <Text style={[styles.statValue, { color: colors.title }]}>{loadingStats ? '...' : tripCount}</Text>
             </View>
 
             <View style={[styles.statCard, { backgroundColor: colors.statCardBg, borderColor: colors.border }]}>
               <View style={styles.statTop}>
                 <Feather name="star" size={16} color={colors.title} />
-                <Text style={[styles.statLabel, { color: colors.subtitle }]}>ĐÁNH GIÁ CỦA TÔI</Text>
+                <Text style={[styles.statLabel, { color: colors.subtitle }]}>{t('profile.stats.myReviews')}</Text>
               </View>
-              <Text style={[styles.statValue, { color: colors.title }]}>8</Text>
+              <Text style={[styles.statValue, { color: colors.title }]}>{loadingStats ? '...' : reviewCount}</Text>
             </View>
           </View>
 
           {/* Settings */}
-          <Text style={[styles.blockTitle, { color: colors.title, marginTop: 18 }]}>Cài đặt</Text>
+          <Text style={[styles.blockTitle, { color: colors.title, marginTop: 18 }]}>{t('profile.settings.title')}</Text>
           <View style={[styles.settingsCard, { backgroundColor: colors.softCardBg, borderColor: colors.border }]}>
             {/* Dark mode */}
             <View style={[styles.settingRow, styles.settingRowFirst, { borderColor: colors.border }]}>
@@ -192,8 +242,8 @@ export default function ProfileScreen() {
                   <Feather name="moon" size={18} color={ExploreEaseColors.primary} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.rowTitle, { color: colors.rowText }]}>Chế độ tối</Text>
-                  <Text style={[styles.rowDesc, { color: colors.subtitle }]}>{isDark ? 'Bật' : 'Tắt'}</Text>
+                  <Text style={[styles.rowTitle, { color: colors.rowText }]}>{t('profile.settings.darkMode')}</Text>
+                  <Text style={[styles.rowDesc, { color: colors.subtitle }]}>{isDark ? t('common.on') : t('common.off')}</Text>
                 </View>
               </View>
 
@@ -210,7 +260,7 @@ export default function ProfileScreen() {
               onPress={() => setLanguageModalVisible(true)}
               style={({ pressed }) => [styles.settingRow, { borderColor: colors.border, opacity: pressed ? 0.85 : 1 }]}
               accessibilityRole="button"
-              accessibilityLabel="Ngôn ngữ"
+              accessibilityLabel={t('profile.settings.language')}
             >
               <View style={styles.rowLeft}>
                 <View style={[styles.iconWrap, { borderColor: colors.border, backgroundColor: 'transparent' }]}>
@@ -232,14 +282,14 @@ export default function ProfileScreen() {
               onPress={() => {}}
               style={({ pressed }) => [styles.settingRow, { borderColor: colors.border, opacity: pressed ? 0.85 : 1 }]}
               accessibilityRole="button"
-              accessibilityLabel="Tiền tệ"
+              accessibilityLabel={t('profile.settings.currency')}
             >
               <View style={styles.rowLeft}>
                 <View style={[styles.iconWrap, { borderColor: colors.border, backgroundColor: 'transparent' }]}>
                   <Feather name="dollar-sign" size={18} color={colors.title} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.rowTitle, { color: colors.rowText }]}>Tiền tệ</Text>
+                  <Text style={[styles.rowTitle, { color: colors.rowText }]}>{t('profile.settings.currency')}</Text>
                   <Text style={[styles.rowDesc, { color: colors.subtitle }]}>{currencyLabel}</Text>
                 </View>
               </View>
@@ -252,15 +302,15 @@ export default function ProfileScreen() {
                 onPress={() => router.push('/admin/dashboard')}
                 style={({ pressed }) => [styles.settingRow, { borderColor: colors.border, opacity: pressed ? 0.85 : 1 }]}
                 accessibilityRole="button"
-                accessibilityLabel="Admin Dashboard"
+                accessibilityLabel={t('profile.settings.adminTitle')}
               >
                 <View style={styles.rowLeft}>
                   <View style={[styles.iconWrap, { borderColor: colors.border, backgroundColor: 'transparent' }]}>
                     <Feather name="shield" size={18} color={colors.title} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.rowTitle, { color: colors.rowText }]}>Admin Dashboard</Text>
-                    <Text style={[styles.rowDesc, { color: colors.subtitle }]}>Moderate events and review reports</Text>
+                    <Text style={[styles.rowTitle, { color: colors.rowText }]}>{t('profile.settings.adminTitle')}</Text>
+                    <Text style={[styles.rowDesc, { color: colors.subtitle }]}>{t('profile.settings.adminSubtitle')}</Text>
                   </View>
                 </View>
 
@@ -273,15 +323,15 @@ export default function ProfileScreen() {
               onPress={handleLogout}
               style={({ pressed }) => [styles.settingRow, { borderColor: colors.border, opacity: pressed ? 0.85 : 1 }]}
               accessibilityRole="button"
-              accessibilityLabel="Đăng xuất"
+              accessibilityLabel={t('profile.settings.logout')}
             >
               <View style={styles.rowLeft}>
                 <View style={[styles.iconWrap, { borderColor: 'rgba(239,68,68,0.25)', backgroundColor: 'rgba(239,68,68,0.08)' }]}>
                   <Feather name="log-out" size={18} color={colors.logout} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.rowTitle, { color: colors.logout }]}>Đăng xuất</Text>
-                  <Text style={[styles.rowDesc, { color: 'rgba(239,68,68,0.75)' }]}>Thoát khỏi tài khoản của bạn</Text>
+                  <Text style={[styles.rowTitle, { color: colors.logout }]}>{t('profile.settings.logout')}</Text>
+                  <Text style={[styles.rowDesc, { color: 'rgba(239,68,68,0.75)' }]}>{t('profile.settings.logoutSubtitle')}</Text>
                 </View>
               </View>
             </Pressable>

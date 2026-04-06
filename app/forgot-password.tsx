@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { supabase } from '@/src/services/supabase';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -53,6 +54,7 @@ const getProgressStep = (step: RecoveryStep) => {
 
 export default function ForgotPasswordScreen() {
   const { isDark } = useTheme();
+  const { t } = useI18n();
   const addNotification = useNotificationStore((s) => s.addNotification);
 
   const [step, setStep] = useState<RecoveryStep>('email');
@@ -77,10 +79,10 @@ export default function ForgotPasswordScreen() {
   const strength = useMemo(() => {
     if (!password) return { level: 0, label: '' as '' | 'weak' | 'fair' | 'strong', text: '' };
     const criteria = validatePassword(password);
-    if (!criteria.minChar) return { level: 1, label: 'weak' as const, text: 'Weak' };
-    if (!criteria.hasUpperAndLower || !criteria.hasNumber) return { level: 2, label: 'fair' as const, text: 'Fair' };
-    return { level: 3, label: 'strong' as const, text: 'Strong' };
-  }, [password]);
+    if (!criteria.minChar) return { level: 1, label: 'weak' as const, text: t('auth.recovery.strengthWeak') };
+    if (!criteria.hasUpperAndLower || !criteria.hasNumber) return { level: 2, label: 'fair' as const, text: t('auth.recovery.strengthFair') };
+    return { level: 3, label: 'strong' as const, text: t('auth.recovery.strengthStrong') };
+  }, [password, t]);
 
   const isPasswordValid = useMemo(() => {
     const c = validatePassword(password);
@@ -129,14 +131,14 @@ export default function ForgotPasswordScreen() {
     setEmailError('');
 
     if (!clean) {
-      const msg = 'Please enter your email address';
+      const msg = t('auth.recovery.emailRequiredMessage');
       setEmailError(msg);
       notify(msg, 'error');
       return;
     }
 
     if (!EMAIL_REGEX.test(clean)) {
-      const msg = 'Please enter a valid email address';
+      const msg = t('auth.recovery.invalidEmailMessage');
       setEmailError(msg);
       notify(msg, 'error');
       return;
@@ -152,9 +154,9 @@ export default function ForgotPasswordScreen() {
       setOtpError('');
       setStep('otp');
       setResendTimer(60);
-      notify('If this email exists, a recovery code has been sent.', 'info');
+      notify(t('auth.recovery.codeSentIfExists'), 'info');
     } catch (err: any) {
-      const message = String(err?.message ?? 'Unable to send code. Please try again.');
+      const message = String(err?.message ?? t('auth.recovery.sendCodeFailedMessage'));
       setEmailError(message);
       notify(message, 'error');
     } finally {
@@ -185,7 +187,7 @@ export default function ForgotPasswordScreen() {
     const otpCode = otpDigits.join('');
 
     if (otpCode.length !== 6) {
-      const msg = 'Please enter all 6 digits';
+      const msg = t('auth.recovery.enterAllOtpDigits');
       setOtpError(msg);
       notify(msg, 'error');
       return;
@@ -209,12 +211,12 @@ export default function ForgotPasswordScreen() {
 
       setStep('password');
       setOtpError('');
-      notify('OTP verified successfully.', 'success');
+      notify(t('auth.recovery.otpVerified'), 'success');
     } catch (err: any) {
       const raw = String(err?.message ?? '').toLowerCase();
       const message = raw.includes('token') || raw.includes('otp') || raw.includes('invalid')
-        ? 'Wrong or expired OTP. Please try again.'
-        : (err?.message ?? 'Unable to verify OTP. Please try again.');
+        ? t('auth.recovery.otpInvalidMessage')
+        : (err?.message ?? t('auth.recovery.verifyOtpFailedMessage'));
       setOtpError(message);
       notify(message, 'error');
     } finally {
@@ -234,9 +236,9 @@ export default function ForgotPasswordScreen() {
       setOtpError('');
       setResendTimer(60);
       otpRefs.current[0]?.focus();
-      notify('Recovery code resent.', 'info');
+      notify(t('auth.recovery.otpResentMessage'), 'info');
     } catch (err: any) {
-      const message = String(err?.message ?? 'Unable to resend code. Please try again.');
+      const message = String(err?.message ?? t('auth.recovery.otpResendFailedMessage'));
       notify(message, 'error');
     } finally {
       setLoading(false);
@@ -247,21 +249,21 @@ export default function ForgotPasswordScreen() {
     setPasswordError('');
 
     if (!password.trim()) {
-      const msg = 'Please enter a new password';
+      const msg = t('auth.recovery.newPasswordRequired');
       setPasswordError(msg);
       notify(msg, 'error');
       return;
     }
 
     if (!isPasswordValid) {
-      const msg = 'Password must have 8+ characters, uppercase/lowercase letters, and a number';
+      const msg = t('auth.recovery.passwordWeakMessage');
       setPasswordError(msg);
       notify(msg, 'error');
       return;
     }
 
     if (!isConfirmMatching) {
-      const msg = 'Passwords do not match';
+      const msg = t('auth.recovery.passwordMismatchMessage');
       setPasswordError(msg);
       notify(msg, 'error');
       return;
@@ -273,9 +275,9 @@ export default function ForgotPasswordScreen() {
       if (error) throw error;
 
       setStep('success');
-      notify('Password updated successfully.', 'success');
+      notify(t('auth.recovery.passwordUpdatedSuccess'), 'success');
     } catch (err: any) {
-      const message = String(err?.message ?? 'Unable to update password. Please try again.');
+      const message = String(err?.message ?? t('auth.recovery.passwordUpdateFailedMessage'));
       setPasswordError(message);
       notify(message, 'error');
     } finally {
@@ -300,10 +302,10 @@ export default function ForgotPasswordScreen() {
         </View>
       </View>
 
-      <Text style={[styles.title, { color: colors.title }]}>Forgot your password?</Text>
-      <Text style={[styles.subtitle, { color: colors.muted }]}>No worries! Enter your email and we will send you a recovery code.</Text>
+      <Text style={[styles.title, { color: colors.title }]}>{t('auth.recovery.forgotPasswordTitle')}</Text>
+      <Text style={[styles.subtitle, { color: colors.muted }]}>{t('auth.recovery.forgotPasswordSubtitle')}</Text>
 
-      <Text style={[styles.label, { color: colors.title }]}>Email Address</Text>
+      <Text style={[styles.label, { color: colors.title }]}>{t('auth.login.emailLabel')}</Text>
       <View style={[styles.inputWrap, { backgroundColor: colors.inputBg, borderColor: colors.border }]}> 
         <MaterialCommunityIcons name="email-outline" size={20} color={colors.muted} />
         <TextInput
@@ -315,7 +317,7 @@ export default function ForgotPasswordScreen() {
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
-          placeholder="you@example.com"
+          placeholder={t('auth.login.emailPlaceholder')}
           placeholderTextColor={colors.muted}
           style={[styles.inputText, { color: colors.inputText }]}
           editable={!loading}
@@ -342,11 +344,11 @@ export default function ForgotPasswordScreen() {
         {loading ? (
           <View style={styles.btnRow}>
             <ActivityIndicator color="#001018" />
-            <Text style={styles.primaryBtnText}>Sending...</Text>
+            <Text style={styles.primaryBtnText}>{t('auth.recovery.sending')}</Text>
           </View>
         ) : (
           <View style={styles.btnRow}>
-            <Text style={styles.primaryBtnText}>Send Code</Text>
+            <Text style={styles.primaryBtnText}>{t('auth.recovery.sendCodeAction')}</Text>
             <Feather name="arrow-right" size={18} color="#001018" />
           </View>
         )}
@@ -354,9 +356,9 @@ export default function ForgotPasswordScreen() {
 
       <View style={{ alignItems: 'center', marginTop: 14 }}>
         <Text style={{ color: colors.muted, fontSize: 13 }}>
-          Remember your password?{' '}
+          {t('auth.recovery.rememberPasswordPrompt')}{' '}
           <Text onPress={backToSignIn} style={{ color: ExploreEaseColors.primary, fontWeight: '800' }}>
-            Sign in
+            {t('common.login')}
           </Text>
         </Text>
       </View>
@@ -371,8 +373,8 @@ export default function ForgotPasswordScreen() {
         </View>
       </View>
 
-      <Text style={[styles.title, { color: colors.title }]}>Enter the verification code</Text>
-      <Text style={[styles.subtitle, { color: colors.muted }]}>We sent a 6-digit code to {maskEmail(email)}</Text>
+      <Text style={[styles.title, { color: colors.title }]}>{t('auth.recovery.verifyOtpTitle')}</Text>
+      <Text style={[styles.subtitle, { color: colors.muted }]}>{t('auth.recovery.verifyOtpSubtitle', { email: maskEmail(email) })}</Text>
 
       <View style={styles.otpWrap}>
         {otpDigits.map((digit, index) => (
@@ -416,15 +418,15 @@ export default function ForgotPasswordScreen() {
         {loading ? (
           <View style={styles.btnRow}>
             <ActivityIndicator color="#001018" />
-            <Text style={styles.primaryBtnText}>Verifying...</Text>
+            <Text style={styles.primaryBtnText}>{t('auth.recovery.verifying')}</Text>
           </View>
         ) : (
-          <Text style={styles.primaryBtnText}>Verify Code</Text>
+          <Text style={styles.primaryBtnText}>{t('auth.recovery.verifyOtpAction')}</Text>
         )}
       </Pressable>
 
       <View style={{ alignItems: 'center', marginTop: 14 }}>
-        <Text style={{ color: colors.muted, fontSize: 13, marginBottom: 8 }}>Didn&apos;t receive the code?</Text>
+        <Text style={{ color: colors.muted, fontSize: 13, marginBottom: 8 }}>{t('auth.recovery.didNotReceiveCode')}</Text>
         <Pressable
           onPress={() => void handleResendOtp()}
           disabled={loading || resendTimer > 0}
@@ -434,14 +436,14 @@ export default function ForgotPasswordScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <MaterialCommunityIcons name="restore" size={16} color={ExploreEaseColors.primary} />
             <Text style={{ color: ExploreEaseColors.primary, fontSize: 13, fontWeight: '700', opacity: loading || resendTimer > 0 ? 0.5 : 1 }}>
-              {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend Code'}
+              {resendTimer > 0 ? t('auth.recovery.resendIn', { seconds: resendTimer }) : t('auth.recovery.resendOtpAction')}
             </Text>
           </View>
         </Pressable>
       </View>
 
       <View style={[styles.noteCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)' }]}>
-        <Text style={[styles.noteText, { color: colors.muted }]}>The code expires in 10 minutes. If you need help, contact support.</Text>
+        <Text style={[styles.noteText, { color: colors.muted }]}>{t('auth.recovery.otpExpiryHint')}</Text>
       </View>
     </View>
   );
@@ -454,10 +456,10 @@ export default function ForgotPasswordScreen() {
         </View>
       </View>
 
-      <Text style={[styles.title, { color: colors.title }]}>Create a new password</Text>
-      <Text style={[styles.subtitle, { color: colors.muted }]}>Make it strong to protect your account</Text>
+      <Text style={[styles.title, { color: colors.title }]}>{t('auth.recovery.newPasswordTitle')}</Text>
+      <Text style={[styles.subtitle, { color: colors.muted }]}>{t('auth.recovery.newPasswordSubtitle')}</Text>
 
-      <Text style={[styles.label, { color: colors.title }]}>New Password</Text>
+      <Text style={[styles.label, { color: colors.title }]}>{t('auth.recovery.newPasswordLabel')}</Text>
       <View style={[styles.inputWrap, { backgroundColor: colors.inputBg, borderColor: colors.border }]}> 
         <MaterialCommunityIcons name="lock-outline" size={20} color={colors.muted} />
         <TextInput
@@ -467,7 +469,7 @@ export default function ForgotPasswordScreen() {
             setPasswordError('');
           }}
           secureTextEntry={!showPassword}
-          placeholder="Enter new password"
+          placeholder={t('auth.recovery.newPasswordPlaceholder')}
           placeholderTextColor={colors.muted}
           style={[styles.inputText, { color: colors.inputText }]}
           editable={!loading}
@@ -504,14 +506,14 @@ export default function ForgotPasswordScreen() {
           </View>
 
           <View style={{ marginTop: 8, gap: 6 }}>
-            <PasswordRuleRow met={password.length >= 8} text="At least 8 characters" colors={colors} />
-            <PasswordRuleRow met={/[A-Z]/.test(password) && /[a-z]/.test(password)} text="Uppercase and lowercase letters" colors={colors} />
-            <PasswordRuleRow met={/\d/.test(password)} text="At least one number" colors={colors} />
+            <PasswordRuleRow met={password.length >= 8} text={t('auth.recovery.ruleMinChar')} colors={colors} />
+            <PasswordRuleRow met={/[A-Z]/.test(password) && /[a-z]/.test(password)} text={t('auth.recovery.ruleUpperLower')} colors={colors} />
+            <PasswordRuleRow met={/\d/.test(password)} text={t('auth.recovery.ruleNumber')} colors={colors} />
           </View>
         </View>
       ) : null}
 
-      <Text style={[styles.label, { color: colors.title }]}>Confirm Password</Text>
+      <Text style={[styles.label, { color: colors.title }]}>{t('auth.recovery.confirmPasswordLabel')}</Text>
       <View style={[styles.inputWrap, { backgroundColor: colors.inputBg, borderColor: colors.border }]}> 
         <MaterialCommunityIcons name="lock-outline" size={20} color={colors.muted} />
         <TextInput
@@ -521,7 +523,7 @@ export default function ForgotPasswordScreen() {
             setPasswordError('');
           }}
           secureTextEntry={!showConfirmPassword}
-          placeholder="Confirm password"
+          placeholder={t('auth.recovery.confirmPasswordPlaceholder')}
           placeholderTextColor={colors.muted}
           style={[styles.inputText, { color: colors.inputText }]}
           editable={!loading}
@@ -539,7 +541,7 @@ export default function ForgotPasswordScreen() {
             <MaterialCommunityIcons name="close-circle" size={16} color={colors.danger} />
           )}
           <Text style={{ color: isConfirmMatching ? colors.success : colors.danger, fontSize: 12, fontWeight: '700' }}>
-            {isConfirmMatching ? 'Passwords match' : 'Passwords do not match'}
+            {isConfirmMatching ? t('auth.recovery.passwordsMatch') : t('auth.recovery.passwordsDoNotMatch')}
           </Text>
         </View>
       ) : null}
@@ -563,15 +565,15 @@ export default function ForgotPasswordScreen() {
         {loading ? (
           <View style={styles.btnRow}>
             <ActivityIndicator color="#001018" />
-            <Text style={styles.primaryBtnText}>Updating...</Text>
+            <Text style={styles.primaryBtnText}>{t('auth.recovery.updating')}</Text>
           </View>
         ) : (
-          <Text style={styles.primaryBtnText}>Update Password</Text>
+          <Text style={styles.primaryBtnText}>{t('auth.recovery.updatePasswordAction')}</Text>
         )}
       </Pressable>
 
       <View style={[styles.noteCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)' }]}>
-        <Text style={[styles.noteText, { color: colors.muted }]}>Your password is encrypted and protected with industry-leading security standards.</Text>
+        <Text style={[styles.noteText, { color: colors.muted }]}>{t('auth.recovery.encryptionHint')}</Text>
       </View>
     </View>
   );
@@ -584,19 +586,19 @@ export default function ForgotPasswordScreen() {
         </View>
       </View>
 
-      <Text style={[styles.title, { color: colors.title, textAlign: 'center' }]}>Password reset!</Text>
-      <Text style={[styles.subtitle, { color: colors.muted, textAlign: 'center' }]}>Your password has been updated successfully. Please sign in with your new password.</Text>
+      <Text style={[styles.title, { color: colors.title, textAlign: 'center' }]}>{t('auth.recovery.successTitle')}</Text>
+      <Text style={[styles.subtitle, { color: colors.muted, textAlign: 'center' }]}>{t('auth.recovery.successSubtitle')}</Text>
 
       <Pressable
         onPress={backToSignIn}
         style={({ pressed }) => [styles.primaryBtn, pressed ? { opacity: 0.86 } : null]}
         accessibilityRole="button"
       >
-        <Text style={styles.primaryBtnText}>Back to Sign In</Text>
+        <Text style={styles.primaryBtnText}>{t('auth.recovery.backToLogin')}</Text>
       </Pressable>
 
       <View style={[styles.noteCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)' }]}>
-        <Text style={[styles.noteText, { color: colors.muted }]}>If you didn&apos;t make this change, please contact support immediately.</Text>
+        <Text style={[styles.noteText, { color: colors.muted }]}>{t('auth.recovery.securityHint')}</Text>
       </View>
     </View>
   );
@@ -619,7 +621,7 @@ export default function ForgotPasswordScreen() {
             ))}
           </View>
           <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700' }}>
-            Step {Math.min(progressStep, 3)} of 3
+              {t('auth.recovery.progressStep', { current: Math.min(progressStep, 3) })}
           </Text>
         </View>
 
@@ -631,8 +633,8 @@ export default function ForgotPasswordScreen() {
 
           <View style={[styles.footerWrap, { borderColor: colors.border }]}>
             <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center' }}>
-              Need help?{' '}
-              <Text style={{ color: ExploreEaseColors.primary, fontWeight: '700' }}>Contact support</Text>
+              {t('auth.recovery.needHelp')}{' '}
+              <Text style={{ color: ExploreEaseColors.primary, fontWeight: '700' }}>{t('auth.recovery.contactSupport')}</Text>
             </Text>
           </View>
         </ScrollView>

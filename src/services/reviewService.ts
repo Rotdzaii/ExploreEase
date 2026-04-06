@@ -85,7 +85,45 @@ const getFileExtension = (fileName?: string, contentType?: string): string => {
 
 const randomSuffix = () => Math.random().toString(36).slice(2, 10);
 
+const isMissingRelationError = (error: unknown): boolean => {
+  const message = String((error as any)?.message ?? '').toLowerCase();
+  return (
+    (message.includes('relation') && message.includes('does not exist')) ||
+    (message.includes('table') && message.includes('does not exist'))
+  );
+};
+
 export const reviewService = {
+  async countReviewsForCurrentUser(): Promise<number> {
+    const userId = await ensureAuthenticatedUserId();
+
+    const destinationCountRequest = supabase
+      .from('reviews')
+      .select('id', { head: true, count: 'exact' })
+      .eq('user_id', userId);
+
+    const eventCountRequest = supabase
+      .from('event_reviews')
+      .select('id', { head: true, count: 'exact' })
+      .eq('user_id', userId);
+
+    const [destinationResult, eventResult] = await Promise.all([
+      destinationCountRequest,
+      eventCountRequest,
+    ]);
+
+    if (destinationResult.error) throw destinationResult.error;
+
+    if (eventResult.error && !isMissingRelationError(eventResult.error)) {
+      throw eventResult.error;
+    }
+
+    const destinationCount = typeof destinationResult.count === 'number' ? destinationResult.count : 0;
+    const eventCount = typeof eventResult.count === 'number' ? eventResult.count : 0;
+
+    return destinationCount + eventCount;
+  },
+
   async toggleHelpful(reviewId: string): Promise<ToggleHelpfulResult> {
     const trimmedReviewId = reviewId?.trim();
     if (!trimmedReviewId) throw new Error('Review ID is required');

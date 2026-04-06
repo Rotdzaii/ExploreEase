@@ -1,7 +1,30 @@
 import { supabase } from './supabase';
 
+type ProfileRow = {
+  full_name: string | null;
+  nationality: string;
+  interests: string[];
+};
+
+const normalizeInterests = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' ? item.trim() : String(item ?? '').trim()))
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
 export const profileService = {
-  async getCurrentProfile(): Promise<{ full_name: string | null; nationality: string } | null> {
+  async getCurrentProfile(): Promise<ProfileRow | null> {
     const { data: authData, error: authErr } = await supabase.auth.getUser();
     if (authErr) throw authErr;
 
@@ -27,7 +50,11 @@ export const profileService = {
         ? 'VN'
         : upperNationality;
 
-    return { full_name: (data as any)?.full_name ?? null, nationality: normalizedNationality };
+    return {
+      full_name: (data as any)?.full_name ?? null,
+      nationality: normalizedNationality,
+      interests: normalizeInterests((data as any)?.interests),
+    };
   },
 
   async getCurrentNationality(): Promise<string> {

@@ -1,5 +1,6 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { itineraryService, type ItineraryItemRow } from '@/src/services/itineraryService';
 import { optimizeDayRoute } from '@/utils/routeOptimization';
 import { Feather } from '@expo/vector-icons';
@@ -40,12 +41,12 @@ const toTimelineItem = (row: ItineraryItemRow): TimelineItem => ({
   raw: row,
 });
 
-const openGoogleMaps = async (item: TimelineItem) => {
+const openGoogleMaps = async (item: TimelineItem, t: (key: string, params?: Record<string, string | number>) => string) => {
   const lat = item.latitude;
   const lng = item.longitude;
 
   if (typeof lat !== 'number' || typeof lng !== 'number') {
-    Alert.alert('Chưa có tọa độ', 'Điểm đến này chưa có thông tin tọa độ để mở bản đồ.');
+    Alert.alert(t('timeline.map.noCoordinatesTitle'), t('timeline.map.noCoordinatesMessage'));
     return;
   }
 
@@ -53,7 +54,7 @@ const openGoogleMaps = async (item: TimelineItem) => {
   const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}${label ? `(${label})` : ''}`;
   const canOpen = await Linking.canOpenURL(url);
   if (!canOpen) {
-    Alert.alert('Không thể mở bản đồ', 'Thiết bị không hỗ trợ mở liên kết bản đồ.');
+    Alert.alert(t('timeline.map.openFailedTitle'), t('timeline.map.openFailedMessage'));
     return;
   }
 
@@ -76,6 +77,7 @@ export function DayTimeline({
   onPressAddDestination,
 }: DayTimelineProps) {
   const { isDark } = useTheme();
+  const { t } = useI18n();
   const [items, setItems] = useState<ItineraryItemRow[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -100,11 +102,11 @@ export function DayTimeline({
     } catch (err: any) {
       console.warn('getItemsByTripAndDay failed:', err?.message ?? err);
       setItems([]);
-      setErrorMessage('Không thể tải lịch trình.');
+      setErrorMessage(t('timeline.error.load'));
     } finally {
       setLoading(false);
     }
-  }, [day, tripId]);
+  }, [day, t, tripId]);
 
   useEffect(() => {
     let alive = true;
@@ -131,15 +133,15 @@ export function DayTimeline({
   const onReminder = useCallback(
     (item: TimelineItem) => {
       if (onPressReminder) return onPressReminder(item);
-      Alert.alert('Nhắc nhở', 'Chưa gắn xử lý nhắc nhở cho mục này.');
+      Alert.alert(t('timeline.reminder.title'), t('timeline.reminder.missingHandler'));
     },
-    [onPressReminder]
+    [onPressReminder, t]
   );
 
   if (loading) {
     return (
       <View style={[styles.loadingWrap, { borderColor: colors.border, backgroundColor: colors.cardBg }]}>
-        <Text style={[styles.loadingText, { color: colors.subtitle }]}>Đang tải lịch trình...</Text>
+        <Text style={[styles.loadingText, { color: colors.subtitle }]}>{t('timeline.loading')}</Text>
       </View>
     );
   }
@@ -154,7 +156,7 @@ export function DayTimeline({
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[styles.errorTitle, { color: colors.title }]}>{errorMessage}</Text>
-            <Text style={[styles.errorText, { color: colors.subtitle }]}>Kiểm tra mạng hoặc đăng nhập rồi thử lại.</Text>
+            <Text style={[styles.errorText, { color: colors.subtitle }]}>{t('timeline.error.checkNetwork')}</Text>
           </View>
         </View>
 
@@ -167,10 +169,10 @@ export function DayTimeline({
             pressed ? { opacity: 0.85 } : null,
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Thử tải lại lịch trình"
+          accessibilityLabel={t('timeline.a11y.retryLoad')}
         >
           <Feather name="refresh-cw" size={16} color={ExploreEaseColors.primary} />
-          <Text style={[styles.retryText, { color: ExploreEaseColors.primary }]}>Thử lại</Text>
+          <Text style={[styles.retryText, { color: ExploreEaseColors.primary }]}>{t('common.retry')}</Text>
         </Pressable>
       </View>
     );
@@ -184,15 +186,15 @@ export function DayTimeline({
             <Feather name="map-pin" size={16} color={ExploreEaseColors.primary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.emptyTitle, { color: colors.title }]}>Ngày {day} đang trống</Text>
-            <Text style={[styles.emptyText, { color: colors.subtitle }]}>Thêm điểm đến để bắt đầu tối ưu lộ trình.</Text>
+            <Text style={[styles.emptyTitle, { color: colors.title }]}>{t('timeline.empty.dayTitle', { day })}</Text>
+            <Text style={[styles.emptyText, { color: colors.subtitle }]}>{t('timeline.empty.daySubtitle')}</Text>
           </View>
         </View>
 
         <Pressable
           onPress={() => {
             if (onPressAddDestination) return onPressAddDestination();
-            Alert.alert('Thêm điểm đến', 'Chưa gắn màn hình thêm điểm đến.');
+            Alert.alert(t('timeline.destination.addTitle'), t('timeline.destination.addMessage'));
           }}
           style={({ pressed, hovered }) => [
             styles.addBtn,
@@ -201,10 +203,10 @@ export function DayTimeline({
             pressed ? { opacity: 0.85 } : null,
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Thêm điểm đến"
+          accessibilityLabel={t('timeline.a11y.addDestination')}
         >
           <Feather name="plus" size={16} color="#001018" />
-          <Text style={styles.addBtnText}>Thêm điểm đến</Text>
+          <Text style={styles.addBtnText}>{t('timeline.destination.addTitle')}</Text>
         </Pressable>
       </View>
     );
@@ -251,20 +253,20 @@ export function DayTimeline({
                   <View style={styles.timeLeft}>
                     <Feather name="clock" size={14} color={ExploreEaseColors.primary} />
                     <Text style={[styles.timeText, { color: ExploreEaseColors.primary }]}>
-                      {timeRange ?? 'Chưa có giờ'}
+                      {timeRange ?? t('timeline.time.missing')}
                     </Text>
                   </View>
 
                   {timeRange && (
                     <View style={[styles.durationPill, { backgroundColor: isDark ? 'rgba(34,211,238,0.12)' : 'rgba(34,211,238,0.12)' }]}>
-                      <Text style={[styles.durationText, { color: ExploreEaseColors.primary }]}>Lịch trình</Text>
+                      <Text style={[styles.durationText, { color: ExploreEaseColors.primary }]}>{t('timeline.time.badge')}</Text>
                     </View>
                   )}
                 </View>
 
                 <View style={styles.actionsRow}>
                   <Pressable
-                    onPress={() => void openGoogleMaps(item)}
+                    onPress={() => void openGoogleMaps(item, t)}
                     style={({ pressed, hovered }) => [
                       styles.routeBtn,
                       {
@@ -275,7 +277,7 @@ export function DayTimeline({
                     ]}
                     accessibilityRole="button"
                   >
-                    <Text style={[styles.routeBtnText, { color: ExploreEaseColors.primary }]}>Xem đường đi</Text>
+                    <Text style={[styles.routeBtnText, { color: ExploreEaseColors.primary }]}>{t('timeline.route.view')}</Text>
                     <Feather name="arrow-right" size={16} color={ExploreEaseColors.primary} />
                   </Pressable>
 
@@ -290,7 +292,7 @@ export function DayTimeline({
                       pressed ? { opacity: 0.85 } : null,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel="Đặt nhắc nhở"
+                    accessibilityLabel={t('timeline.a11y.setReminder')}
                   >
                     <Feather name="bell" size={18} color={ExploreEaseColors.primary} />
                   </Pressable>

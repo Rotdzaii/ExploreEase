@@ -1,4 +1,5 @@
 import { useTheme } from '@/src/context/theme';
+import { useI18n } from '@/src/i18n/useI18n';
 import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Tabs } from 'expo-router';
@@ -10,6 +11,7 @@ export default function TabLayout() {
   const insets = useSafeAreaInsets();
 
   const { isDark } = useTheme();
+  const { t } = useI18n();
   const tabBgColor = isDark ? 'rgba(26, 38, 55, 0.95)' : '#ffffff';
   const tabBorderColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
   const inactiveColor = isDark ? '#9CA3AF' : '#6B7280';
@@ -86,7 +88,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Trang chủ',
+          title: t('tabs.home'),
           tabBarIcon: renderTabIcon('home'),
         }}
       />
@@ -94,7 +96,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="explore"
         options={{
-          title: 'Khám phá',
+          title: t('tabs.explore'),
           tabBarIcon: renderTabIcon('map-pin'),
         }}
       />
@@ -102,7 +104,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="trips"
         options={{
-          title: 'Kế hoạch',
+          title: t('tabs.trips'),
           tabBarIcon: renderTabIcon('briefcase'),
         }}
       />
@@ -110,7 +112,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Cá nhân',
+          title: t('tabs.profile'),
           tabBarIcon: renderTabIcon('user'),
         }}
       />

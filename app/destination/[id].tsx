@@ -393,12 +393,12 @@ export default function DestinationDetailScreen() {
       console.warn('ensureLoggedIn failed:', err?.message ?? err);
     }
 
-    Alert.alert('Cần đăng nhập', 'Vui lòng đăng nhập để thêm điểm đến vào kế hoạch.', [
-      { text: 'Hủy', style: 'cancel' },
-      { text: 'Đăng nhập', onPress: () => router.push('/login' as any) },
+    Alert.alert(t('common.loginRequiredTitle'), t('destination.auth.addToPlanLoginRequired'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.login'), onPress: () => router.push('/login' as any) },
     ]);
     return false;
-  }, []);
+  }, [t]);
 
   const openAddToTrip = useCallback(() => {
     setSelectedTripRow(null);
@@ -434,7 +434,7 @@ export default function DestinationDetailScreen() {
     try {
       const todayIso = new Date().toISOString().slice(0, 10);
       const newTrip = await tripService.createTripForCurrentUser({
-        name: `Chuyến đi tới ${name}`,
+        name: t('destination.trip.newTripName', { name }),
         destination: name,
         cover: imageUrl,
         start_date: todayIso,
@@ -446,16 +446,16 @@ export default function DestinationDetailScreen() {
       setSelectedTripDay(1);
     } catch (err: any) {
       console.warn('createTrip failed:', err?.message ?? err);
-      Alert.alert('Không thể tạo chuyến đi', 'Vui lòng thử lại sau.');
+      Alert.alert(t('trips.error.createTitle'), t('trips.error.tryAgainLater'));
     } finally {
       setCreatingTrip(false);
     }
-  }, [creatingTrip, ensureLoggedIn, imageUrl, name]);
+  }, [creatingTrip, ensureLoggedIn, imageUrl, name, t]);
 
   const createTripAndAutoAdd = useCallback(async () => {
     if (creatingTripAndAdding) return;
     if (!destinationId) {
-      Alert.alert('Không thể thêm vào kế hoạch', 'Thiếu destination_id.');
+      Alert.alert(t('destination.trip.error.addFailedTitle'), t('destination.trip.error.missingDestinationId'));
       return;
     }
 
@@ -478,7 +478,7 @@ export default function DestinationDetailScreen() {
     try {
       const todayIso = new Date().toISOString().slice(0, 10);
       const newTrip = await tripService.createTripForCurrentUser({
-        name: `Chuyến đi tới ${name}`,
+        name: t('destination.trip.newTripName', { name }),
         destination: name,
         cover: imageUrl,
         start_date: todayIso,
@@ -501,22 +501,22 @@ export default function DestinationDetailScreen() {
       setIsNoTripsModalOpen(false);
 
       addNotification({
-        message: 'Đã thêm vào kế hoạch.',
+        message: t('destination.trip.addedSuccess'),
         type: 'success',
         durationMs: 3000,
       });
     } catch (err: any) {
       console.warn('createTripAndAutoAdd failed:', err?.message ?? err);
-      Alert.alert('Không thể thêm vào kế hoạch', 'Vui lòng thử lại sau.');
+      Alert.alert(t('destination.trip.error.addFailedTitle'), t('trips.error.tryAgainLater'));
     } finally {
       setCreatingTripAndAdding(false);
     }
-  }, [addNotification, creatingTripAndAdding, destinationCoords, destinationId, destinationRow, ensureLoggedIn, imageUrl, name]);
+  }, [addNotification, creatingTripAndAdding, destinationCoords, destinationId, destinationRow, ensureLoggedIn, imageUrl, name, t]);
 
   const addToTrip = useCallback(async () => {
     if (!selectedTripRow || savingToTrip) return;
     if (!destinationId) {
-      Alert.alert('Không thể thêm vào kế hoạch', 'Thiếu destination_id.');
+      Alert.alert(t('destination.trip.error.addFailedTitle'), t('destination.trip.error.missingDestinationId'));
       return;
     }
 
@@ -549,17 +549,17 @@ export default function DestinationDetailScreen() {
 
       closeTripPicker();
       addNotification({
-        message: 'Đã thêm vào kế hoạch.',
+        message: t('destination.trip.addedSuccess'),
         type: 'success',
         durationMs: 3000,
       });
     } catch (err: any) {
       console.warn('addToTrip failed:', err?.message ?? err);
-      Alert.alert('Không thể thêm vào kế hoạch', 'Vui lòng thử lại sau.');
+      Alert.alert(t('destination.trip.error.addFailedTitle'), t('trips.error.tryAgainLater'));
     } finally {
       setSavingToTrip(false);
     }
-  }, [addNotification, closeTripPicker, destinationCoords, destinationId, destinationRow, ensureLoggedIn, imageUrl, name, savingToTrip, selectedTripDay, selectedTripRow]);
+  }, [addNotification, closeTripPicker, destinationCoords, destinationId, destinationRow, ensureLoggedIn, imageUrl, name, savingToTrip, selectedTripDay, selectedTripRow, t]);
 
   const handleAddToPlan = useCallback(() => {
     void (async () => {
@@ -665,14 +665,14 @@ export default function DestinationDetailScreen() {
       setIsFavorited(!next);
       const msg = String((err as any)?.message ?? '').toLowerCase();
       if (msg.includes('favorites table is missing')) {
-        Alert.alert('Chưa bật tính năng yêu thích', 'Server chưa có bảng favorites. Hãy chạy migration favorites trên Supabase rồi thử lại.');
+        Alert.alert(t('destination.favorite.unavailableTitle'), t('destination.favorite.unavailableMessage'));
       } else {
-        Alert.alert('Không thể lưu địa điểm', 'Vui lòng đăng nhập và thử lại.');
+        Alert.alert(t('destination.favorite.saveFailedTitle'), t('destination.favorite.saveFailedMessage'));
       }
     } finally {
       setTogglingFavorite(false);
     }
-  }, [destinationId, isFavorited, togglingFavorite]);
+  }, [destinationId, isFavorited, t, togglingFavorite]);
 
   useEffect(() => {
     if (!destinationId) return;
@@ -1206,8 +1206,8 @@ export default function DestinationDetailScreen() {
       destinationRow?.about ??
       null;
     if (typeof raw === 'string' && raw.trim()) return raw.trim();
-    return `Khám phá ${name} với những trải nghiệm đáng nhớ, khung cảnh ấn tượng và dịch vụ chất lượng.`;
-  }, [destinationRow, name]);
+    return t('destination.detail.fallbackDescription', { name });
+  }, [destinationRow, name, t]);
 
   const addressText = useMemo(() => {
     const raw =
@@ -1221,9 +1221,9 @@ export default function DestinationDetailScreen() {
   }, [destinationRow, params.location]);
 
   const addressDisplayText = useMemo(() => {
-    if (!destinationCoords || !addressText.trim()) return 'Đang cập nhật địa chỉ...';
+    if (!destinationCoords || !addressText.trim()) return t('destination.detail.addressUpdating');
     return addressText.trim();
-  }, [addressText, destinationCoords]);
+  }, [addressText, destinationCoords, t]);
 
   const amenities = useMemo(() => {
     return toAmenityList(destinationRow?.amenities ?? destinationRow?.features ?? destinationRow?.utilities);
@@ -1233,11 +1233,11 @@ export default function DestinationDetailScreen() {
 
   const toSuggestionPrice = useCallback(
     (value: number | null) => {
-      if (value === null) return '—';
-      if (value <= 0) return 'FREE';
+      if (value === null) return t('common.na');
+      if (value <= 0) return t('common.free');
       return formatPricePerPerson(value);
     },
-    [formatPricePerPerson]
+    [formatPricePerPerson, t]
   );
 
   const recommendationItems = useMemo<YouMightAlsoLikeItem[]>(
@@ -1479,7 +1479,7 @@ export default function DestinationDetailScreen() {
                   (loadingFavorite || togglingFavorite) ? { opacity: 0.7 } : null,
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel="Lưu địa điểm"
+                accessibilityLabel={t('destination.favorite.a11ySave')}
               >
                 <MaterialCommunityIcons
                   name={isFavorited ? 'heart' : 'heart-outline'}
@@ -1492,7 +1492,7 @@ export default function DestinationDetailScreen() {
         </View>
 
         <View style={{ paddingHorizontal: s(16), marginTop: s(18) }}>
-          <Text style={{ color: contentTitleColor, fontWeight: '900', fontSize: s(18) }}>Mô tả</Text>
+          <Text style={{ color: contentTitleColor, fontWeight: '900', fontSize: s(18) }}>{t('destination.detail.descriptionTitle')}</Text>
           <Text
             style={{
               color: contentTextColor,
@@ -1507,7 +1507,7 @@ export default function DestinationDetailScreen() {
 
           {amenities.length ? (
             <View style={{ marginTop: s(16) }}>
-              <Text style={{ color: contentTitleColor, fontWeight: '900', fontSize: s(18) }}>Tiện ích</Text>
+              <Text style={{ color: contentTitleColor, fontWeight: '900', fontSize: s(18) }}>{t('destination.detail.amenitiesTitle')}</Text>
               <Text
                 style={{
                   color: contentTextColor,
@@ -1543,13 +1543,13 @@ export default function DestinationDetailScreen() {
 
         <View style={{ paddingHorizontal: s(16), marginTop: s(18) }}>
           <View style={[styles.locationHeaderRow, { marginBottom: s(12) }]}>
-            <Text style={{ color: contentTitleColor, fontWeight: '900', fontSize: s(18) }}>Vị trí</Text>
+            <Text style={{ color: contentTitleColor, fontWeight: '900', fontSize: s(18) }}>{t('destination.detail.locationTitle')}</Text>
             {isLoadingLocation ? (
-              <Text style={{ color: contentMutedColor, fontWeight: '800', fontSize: s(13) }}>Đang lấy vị trí...</Text>
+              <Text style={{ color: contentMutedColor, fontWeight: '800', fontSize: s(13) }}>{t('destination.detail.locationLoading')}</Text>
             ) : distanceText ? (
-              <Text style={{ color: contentMutedColor, fontWeight: '800', fontSize: s(13) }}>Cách bạn {distanceText}</Text>
+              <Text style={{ color: contentMutedColor, fontWeight: '800', fontSize: s(13) }}>{t('destination.detail.distanceFromYou', { distance: distanceText })}</Text>
             ) : locationErrorMsg ? (
-              <Text style={{ color: contentMutedColor, fontWeight: '800', fontSize: s(13) }}>Bật GPS để xem khoảng cách</Text>
+              <Text style={{ color: contentMutedColor, fontWeight: '800', fontSize: s(13) }}>{t('destination.detail.enableGpsDistance')}</Text>
             ) : null}
           </View>
 
@@ -1607,7 +1607,7 @@ export default function DestinationDetailScreen() {
                     {name}
                   </Text>
                   <Text style={{ color: 'rgba(226,232,240,0.92)', fontWeight: '700', fontSize: s(11), marginTop: s(2) }}>
-                    {destinationCoords ? 'Nhấn để mở Google Maps' : 'Đang cập nhật vị trí...'}
+                    {destinationCoords ? t('destination.detail.openInMaps') : t('destination.detail.locationUpdating')}
                   </Text>
                 </View>
 
@@ -1626,7 +1626,7 @@ export default function DestinationDetailScreen() {
                         backgroundColor: 'rgba(0,0,0,0.26)',
                       }}
                     >
-                      <Text style={{ color: '#fff', fontWeight: '900', fontSize: s(11) }}>Đang tải...</Text>
+                      <Text style={{ color: '#fff', fontWeight: '900', fontSize: s(11) }}>{t('destination.detail.loading')}</Text>
                     </BlurView>
                   </View>
                 ) : null}
@@ -1851,7 +1851,7 @@ export default function DestinationDetailScreen() {
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 16, fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>
-                  Thêm vào kế hoạch
+                  {t('destination.trip.addToPlanTitle')}
                 </Text>
                 <Pressable
                   onPress={closeTripPicker}
@@ -1870,7 +1870,7 @@ export default function DestinationDetailScreen() {
                     pressed ? { opacity: 0.85 } : null,
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel="Đóng"
+                  accessibilityLabel={t('destination.trip.close')}
                 >
                   <MaterialCommunityIcons name="close" size={18} color={isDark ? '#ffffff' : '#0f172a'} />
                 </Pressable>
@@ -1880,7 +1880,7 @@ export default function DestinationDetailScreen() {
                 <View style={{ paddingTop: 2, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <ActivityIndicator color={ExploreEaseColors.primary} />
                   <Text style={{ fontWeight: '700', color: isDark ? 'rgba(148,163,184,0.95)' : 'rgba(15,23,42,0.55)' }}>
-                    Đang tải chuyến đi...
+                    {t('trips.loadingTitle')}
                   </Text>
                 </View>
               ) : selectedTripRow ? (
@@ -1899,7 +1899,7 @@ export default function DestinationDetailScreen() {
                       {selectedTripRow.name}
                     </Text>
                     <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
-                      Chọn ngày để thêm điểm đến
+                      {t('destination.trip.pickDayForDestination')}
                     </Text>
                   </View>
 
@@ -1925,7 +1925,7 @@ export default function DestinationDetailScreen() {
                           accessibilityRole="button"
                         >
                           <Text style={{ fontSize: 13, fontWeight: '800', color: active ? '#001018' : (isDark ? '#94a3b8' : '#64748b') }}>
-                            Ngày {d}
+                            {t('trips.dayLabel', { day: d })}
                           </Text>
                         </Pressable>
                       );
@@ -1953,7 +1953,7 @@ export default function DestinationDetailScreen() {
                       ]}
                       accessibilityRole="button"
                     >
-                      <Text style={{ fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>Đổi chuyến</Text>
+                      <Text style={{ fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>{t('destination.trip.changeTrip')}</Text>
                     </Pressable>
 
                     <Pressable
@@ -1975,21 +1975,21 @@ export default function DestinationDetailScreen() {
                         pressed ? { opacity: 0.86 } : null,
                       ]}
                       accessibilityRole="button"
-                      accessibilityLabel="Xác nhận thêm vào hành trình"
+                      accessibilityLabel={t('destination.trip.confirmAdd')}
                     >
                       {savingToTrip ? (
                         <ActivityIndicator color="#001018" />
                       ) : (
                         <MaterialCommunityIcons name="check" size={18} color="#001018" />
                       )}
-                      <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>Xác nhận</Text>
+                      <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>{t('destination.trip.confirmAdd')}</Text>
                     </Pressable>
                   </View>
                 </View>
               ) : (
                 <View style={{ gap: 10 }}>
                   <Text style={{ fontWeight: '800', color: isDark ? '#94a3b8' : '#64748b' }}>
-                    Chọn một chuyến đi
+                    {t('destination.trip.pickTrip')}
                   </Text>
                   <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 10 }}>
                     {trips.map((t) => {
@@ -2021,7 +2021,7 @@ export default function DestinationDetailScreen() {
                             {t.name}
                           </Text>
                           <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }} numberOfLines={2}>
-                            {(t.destination ?? '').trim() ? `${t.destination} • ` : ''}{daysCount} ngày
+                            {(t.destination ?? '').trim() ? `${t.destination} • ` : ''}{t('trips.card.days', { count: daysCount })}
                           </Text>
                         </Pressable>
                       );
@@ -2063,10 +2063,10 @@ export default function DestinationDetailScreen() {
               }}
             >
               <Text style={{ fontSize: 16, fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>
-                Chưa có chuyến đi
+                {t('destination.trip.noTripsTitle')}
               </Text>
               <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#94a3b8' : '#64748b', lineHeight: 18 }}>
-                Bạn cần tạo ít nhất một chuyến đi trước khi thêm điểm đến này.
+                {t('destination.trip.noTripsMessage')}
               </Text>
 
               <Pressable
@@ -2087,14 +2087,14 @@ export default function DestinationDetailScreen() {
                   pressed ? { opacity: 0.86 } : null,
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel="Tạo ngay"
+                accessibilityLabel={t('destination.trip.createNow')}
               >
                 {creatingTripAndAdding ? (
                   <ActivityIndicator color="#001018" />
                 ) : (
                   <MaterialCommunityIcons name="plus" size={18} color="#001018" />
                 )}
-                <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>Tạo ngay</Text>
+                <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>{t('destination.trip.createNow')}</Text>
               </Pressable>
             </Pressable>
           </Pressable>
@@ -2168,7 +2168,7 @@ export default function DestinationDetailScreen() {
                 }}
               >
                 <View style={{ flex: 1, minWidth: s(120) }}>
-                  <Text style={{ color: footerMuted, fontWeight: '900', fontSize: s(12) }}>Giá</Text>
+                  <Text style={{ color: footerMuted, fontWeight: '900', fontSize: s(12) }}>{t('destination.detail.priceLabel')}</Text>
                   <Text
                     style={{ color: footerFg, fontWeight: '900', fontSize: s(18), marginTop: s(4) }}
                     numberOfLines={1}
@@ -2196,18 +2196,18 @@ export default function DestinationDetailScreen() {
                       pressed ? { opacity: 0.86, transform: [{ scale: 0.95 }] } : null,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel="Thêm vào kế hoạch"
+                    accessibilityLabel={t('destination.trip.addToPlanTitle')}
                   >
                     <MaterialCommunityIcons name="playlist-plus" size={s(18)} color={ExploreEaseColors.primary} />
                     <Text style={{ color: footerFg, fontWeight: '900', fontSize: s(13) }} numberOfLines={1}>
-                      Thêm vào kế hoạch
+                      {t('destination.trip.addToPlanTitle')}
                     </Text>
                   </Pressable>
 
                   <Pressable
                     onPress={() => {
                       if (!destinationCoords) {
-                        Alert.alert('Chỉ đường', 'Địa điểm này chưa có toạ độ để mở bản đồ.');
+                        Alert.alert(t('destination.directions.title'), t('destination.directions.missingCoords'));
                         return;
                       }
                       void openGoogleMaps(destinationCoords);
@@ -2221,7 +2221,7 @@ export default function DestinationDetailScreen() {
                       pressed ? { opacity: 0.9, transform: [{ scale: 0.95 }] } : null,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel="Chỉ đường"
+                    accessibilityLabel={t('destination.directions.title')}
                   >
                     <LinearGradient
                       colors={[ExploreEaseColors.primary, 'rgba(34, 211, 238, 0.78)']}
@@ -2238,7 +2238,7 @@ export default function DestinationDetailScreen() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: s(8) }}>
                         <MaterialCommunityIcons name="map" size={s(18)} color={ExploreEaseColors.background} />
                         <Text style={{ color: ExploreEaseColors.background, fontWeight: '900', fontSize: s(15) }}>
-                          Chỉ đường
+                          {t('destination.directions.title')}
                         </Text>
                       </View>
                     </LinearGradient>
@@ -2264,7 +2264,7 @@ export default function DestinationDetailScreen() {
             <View className="flex-1 px-5 pt-2" style={{ gap: 12 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>
-                  Thêm vào kế hoạch
+                  {t('destination.trip.addToPlanTitle')}
                 </Text>
 
                 <Pressable
@@ -2284,7 +2284,7 @@ export default function DestinationDetailScreen() {
                     pressed ? { opacity: 0.85 } : null,
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel="Đóng"
+                  accessibilityLabel={t('destination.trip.close')}
                 >
                   <MaterialCommunityIcons name="close" size={18} color={isDark ? '#ffffff' : '#0f172a'} />
                 </Pressable>
@@ -2294,7 +2294,7 @@ export default function DestinationDetailScreen() {
                 <View style={{ paddingTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <ActivityIndicator color={ExploreEaseColors.primary} />
                   <Text style={{ fontWeight: '700', color: isDark ? 'rgba(148,163,184,0.95)' : 'rgba(15,23,42,0.55)' }}>
-                    Đang tải chuyến đi...
+                    {t('trips.loadingTitle')}
                   </Text>
                 </View>
               ) : trips.length === 0 ? (
@@ -2310,10 +2310,10 @@ export default function DestinationDetailScreen() {
                     }}
                   >
                     <Text style={{ fontWeight: '900', fontSize: 14, color: isDark ? '#ffffff' : '#0f172a' }}>
-                      Bạn chưa có chuyến đi nào
+                      {t('destination.trip.noTripsNoneYet')}
                     </Text>
                     <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
-                      Tạo chuyến đi mới để thêm điểm đến vào hành trình.
+                      {t('destination.trip.noTripsCreateHint')}
                     </Text>
                   </View>
 
@@ -2335,7 +2335,7 @@ export default function DestinationDetailScreen() {
                       pressed ? { opacity: 0.86 } : null,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel="Tạo chuyến đi mới"
+                    accessibilityLabel={t('trips.createNew')}
                   >
                     {creatingTrip ? (
                       <ActivityIndicator color="#001018" />
@@ -2343,7 +2343,7 @@ export default function DestinationDetailScreen() {
                       <MaterialCommunityIcons name="plus" size={18} color="#001018" />
                     )}
                     <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>
-                      Tạo chuyến đi mới
+                      {t('trips.createNew')}
                     </Text>
                   </Pressable>
                 </View>
@@ -2363,7 +2363,7 @@ export default function DestinationDetailScreen() {
                       {selectedTripRow.name}
                     </Text>
                     <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
-                      Chọn ngày để thêm điểm đến
+                      {t('destination.trip.pickDayForDestination')}
                     </Text>
                   </View>
 
@@ -2389,7 +2389,7 @@ export default function DestinationDetailScreen() {
                           accessibilityRole="button"
                         >
                           <Text style={{ fontSize: 13, fontWeight: '800', color: active ? '#001018' : (isDark ? '#94a3b8' : '#64748b') }}>
-                            Ngày {d}
+                            {t('trips.dayLabel', { day: d })}
                           </Text>
                         </Pressable>
                       );
@@ -2417,7 +2417,7 @@ export default function DestinationDetailScreen() {
                       ]}
                       accessibilityRole="button"
                     >
-                      <Text style={{ fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>Đổi chuyến</Text>
+                      <Text style={{ fontWeight: '900', color: isDark ? '#ffffff' : '#0f172a' }}>{t('destination.trip.changeTrip')}</Text>
                     </Pressable>
 
                     <Pressable
@@ -2439,21 +2439,21 @@ export default function DestinationDetailScreen() {
                         pressed ? { opacity: 0.86 } : null,
                       ]}
                       accessibilityRole="button"
-                      accessibilityLabel="Xác nhận thêm vào hành trình"
+                      accessibilityLabel={t('destination.trip.confirmAdd')}
                     >
                       {savingToTrip ? (
                         <ActivityIndicator color="#001018" />
                       ) : (
                         <MaterialCommunityIcons name="check" size={18} color="#001018" />
                       )}
-                      <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>Xác nhận</Text>
+                      <Text style={{ color: '#001018', fontWeight: '900', fontSize: 14 }}>{t('destination.trip.confirmAdd')}</Text>
                     </Pressable>
                   </View>
                 </View>
               ) : (
                 <View style={{ gap: 10 }}>
                   <Text style={{ fontWeight: '800', color: isDark ? '#94a3b8' : '#64748b' }}>
-                    Chọn một chuyến đi
+                    {t('destination.trip.pickTrip')}
                   </Text>
 
                   <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 10 }}>
@@ -2486,7 +2486,7 @@ export default function DestinationDetailScreen() {
                             {t.name}
                           </Text>
                           <Text style={{ fontWeight: '600', fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }} numberOfLines={2}>
-                            {(t.destination ?? '').trim() ? `${t.destination} • ` : ''}{daysCount} ngày
+                            {(t.destination ?? '').trim() ? `${t.destination} • ` : ''}{t('trips.card.days', { count: daysCount })}
                           </Text>
                         </Pressable>
                       );
