@@ -88,6 +88,8 @@ export default function RootLayout() {
               <Stack.Screen name="event/[id]" />
               <Stack.Screen name="itinerary/[id]" />
               <Stack.Screen name="notifications" />
+              <Stack.Screen name="messages/index" />
+              <Stack.Screen name="messages/[id]" />
               <Stack.Screen name="admin/dashboard" />
 
               {/* Nhóm các màn hình có Tab (Home, Settings...) */}

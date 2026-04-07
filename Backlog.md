@@ -26,7 +26,7 @@
 2. LOCATION-BASED DISCOVERY (5%)
     2.1 GPS Integration
 
-        [/] Real-time location tracking: Đã tích hợp expo-location để lấy tọa độ hiện tại của thiết bị.
+        [x] Real-time location tracking: Đã tích hợp expo-location với độ chính xác cao (BestForNavigation/Highest) để theo dõi tọa độ thiết bị.
 
         [x] Handle location permissions properly (Android 12+): Đã xử lý yêu cầu quyền ACCESS_FINE_LOCATION và ACCESS_COARSE_LOCATION.
 
@@ -143,7 +143,9 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
             Status: Implemented ở luồng destination/event detail + review services.
     7.3 Moderation
         [x] Flag/report reviews
-        [ ] Admin panel to review, delete, or approve flagged content
+        [x] Admin panel to review, delete, or approve flagged content
+
+        Status: Đã có tab Moderation trong Admin Dashboard, nạp danh sách report pending và cho phép admin xóa review vi phạm.
 
 8. NOTIFICATIONS (5%)
 

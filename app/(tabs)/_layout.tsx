@@ -141,6 +141,14 @@ export default function TabLayout() {
         />
 
         <Tabs.Screen
+          name="social"
+          options={{
+            title: t('tabs.social'),
+            tabBarIcon: renderTabIcon('users'),
+          }}
+        />
+
+        <Tabs.Screen
           name="trips"
           options={{
             title: t('tabs.trips'),
