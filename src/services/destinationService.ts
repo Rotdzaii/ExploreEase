@@ -141,7 +141,7 @@ export const destinationService = {
     const { data, error } = await supabase
       .from('destinations')
       .select('*, categories(name)')
-      .ilike('name', `%${trimmed}%`)
+      .or(`name.ilike.%${trimmed}%,location.ilike.%${trimmed}%`)
       .order('name', { ascending: true });
 
     if (error) throw error;

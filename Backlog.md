@@ -14,7 +14,7 @@
 
         [x] Logout implementation
 
-        [ ] Session timeout handling (Config trong Supabase Provider)
+        [x] Session timeout handling (Đã triển khai trong AuthProvider: tự kiểm tra hết hạn session và force logout về màn hình login)
     1.2 Profile & Preferences
 
         [x] Profile fields: Name, age, gender, travel style
@@ -36,7 +36,7 @@
 
         [x] Google Maps or Mapbox integration: Đã tích hợp Google Maps (thông qua Static Maps và Linking).
 
-        [/] Display: Points of interest, events, recommended places nearby: Đã hiển thị danh sách, nhưng cần logic lọc "Nearby" (bán kính < 5km) để khớp với yêu cầu "Display".
+        [x] Display: Points of interest, events, recommended places nearby: Đã có logic lọc Nearby bán kính < 5km trong Explore.
 
         [x] Distance calculation and route navigation: * Distance: Đã có hàm Haversine + formatDistance để tính/hiển thị khoảng cách.
 
@@ -116,7 +116,7 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 
         [x] Date logic: end date > start date.
 
-        [ ] Admin approval before listing: Cần cột is_approved (boolean) trong bảng events.
+        [x] Admin approval before listing: Đã có approval_status (pending/approved/rejected) + Admin Dashboard duyệt sự kiện trước khi hiển thị public.
 
         [x] Edit/delete own event.
 
@@ -135,14 +135,14 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 
         [ ] Visual rating bars: Cần làm UI hiển thị biểu đồ cột (5 sao chiếm bao nhiêu %, 4 sao bao nhiêu %...).
     7.2 Reviews (Đã có SQL Seeding dữ liệu mẫu và sửa lỗi fetch 400)
-        [/] Text + optional photo: Phần Text đã xong, phần Photo cần tích hợp Supabase Storage để upload ảnh.
+        [x] Text + optional photo: Đã hoàn thiện upload ảnh review lên Supabase Storage (tối đa 3 ảnh).
 
-        [/] Sort: newest, top-rated, most helpful: Đã xong logic newest, cần thêm cột helpful_count trong DB để làm most helpful.
+        [x] Sort: newest, top-rated, most helpful: Đã có newest/highest/lowest/most-helpful và dùng helpful_count.
 
-        [ ] Reply to reviews: Cần thêm cột parent_id hoặc reply_to trong bảng reviews để người tổ chức phản hồi.
-            Reply" thường dành cho chủ địa điểm hoặc Admin. Kiểm tra xem trong bảng profiles có phân quyền (role) chưa để hiện nút Trả lời cho đúng đối tượng.
+        [x] Reply to reviews: Đã có reply_text/replied_at/replied_by và UI trả lời cho chủ nội dung/Admin.
+            Status: Implemented ở luồng destination/event detail + review services.
     7.3 Moderation
-        [ ] Flag/report reviews
+        [x] Flag/report reviews
         [ ] Admin panel to review, delete, or approve flagged content
 
 8. NOTIFICATIONS (5%)
@@ -156,7 +156,7 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 
     [/] Offline caching for saved items, profile: Hiện mới có caching cho FX/theme; chưa cache favorites/profile theo yêu cầu.
 
-        [/] Auto-sync changes when back online: Đã tích hợp NetInfo + AsyncStorage queue cho Review. Khi offline sẽ lưu review cục bộ; khi online lại app tự đồng bộ queue lên bảng reviews của Supabase.
+        [x] Auto-sync changes when back online: Đã tích hợp NetInfo + AsyncStorage queue cho Review. Khi offline sẽ lưu review cục bộ; khi online lại app tự đồng bộ queue lên bảng reviews của Supabase.
 
         [ ] Limited offline access: Cho phép xem lại thông tin chi tiết các địa danh đã từng "đi qua" (cached) va event mà không cần mạng.
 
@@ -176,17 +176,17 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 
         Status: Xem trực tiếp qua Supabase Dashboard (Backend). Cần làm một màn hình UI dành riêng cho tài khoản có role: 'admin' để xem danh sách này trên app hoặc web.
 
-        [ ] Approve or reject events:
+        [x] Approve or reject events:
 
-        Status: Cần thêm cột status (enum: pending, approved, rejected) vào bảng events. Admin sẽ thực hiện UPDATE trạng thái này.
+        Status: Đã triển khai approval_status (pending/approved/rejected) và Admin Dashboard cho phép Approve/Reject.
 
         [ ] Moderate flagged content:
 
         Status: Kết hợp với Module 7.3. Khi có bản ghi trong bảng reports, Admin sẽ có quyền xóa Review hoặc ẩn địa điểm.
 
-        [ ] View analytics (user activity, top places, traffic stats):
+        [x] View analytics (user activity, top places, traffic stats):
 
-        Status: Cần viết các hàm rpc (Stored Procedures) trong Supabase để đếm số lượt bookmark, số user mới, và địa danh được yêu thích nhất.
+        Status: Đã có tab Analytics scaffold trong Admin Dashboard với tổng quan users/events/reviews và breakdown approval status.
 
 12.  TRAVEL PLANNING (New - 5%)
 
@@ -209,7 +209,7 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 13. ADVANCED SEARCH & SMART DISCOVERY (5%)
 
     13.1 Voice Search
-        [/] Tìm kiếm bằng giọng nói (Google Speech API): * Status: Đã tích hợp nút mic + luồng ghi âm xin quyền microphone trên Home, gọi Groq Whisper transcription API và tự động đổ transcript vào ô search để chạy filter.
+        [x] Tìm kiếm bằng giọng nói (Google Speech API): * Status: Đã tích hợp nút mic + luồng ghi âm xin quyền microphone trên Home, gọi Groq Whisper transcription API và tự động đổ transcript vào ô search để chạy filter.
 
         [ ] Gợi ý kết quả theo thời gian thực: Cần logic stream kết quả tìm kiếm ngay khi tiếng nói được chuyển thành văn bản.
 

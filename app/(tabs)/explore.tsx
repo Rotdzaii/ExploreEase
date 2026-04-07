@@ -23,7 +23,7 @@ import {
     useLocationOverrideStore,
 } from '@/utils/location';
 import { Feather } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -98,6 +98,7 @@ const getEventDateRange = (filter: EventDateFilter) => {
 
 
 export default function ExploreScreen() {
+  const params = useLocalSearchParams<{ q?: string | string[] }>();
   const { isDark } = useTheme();
   const { t, language } = useI18n();
   const addNotification = useNotificationStore((s) => s.addNotification);
@@ -118,6 +119,7 @@ export default function ExploreScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState<DiscoverySearchSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const lastAppliedRouteQueryRef = useRef<string>('');
 
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [eventCategories, setEventCategories] = useState<string[]>([]);
@@ -190,6 +192,23 @@ export default function ExploreScreen() {
     }),
     [isDark]
   );
+
+  const incomingRouteQuery = useMemo(() => {
+    const raw = Array.isArray(params.q) ? params.q[0] : params.q;
+    return typeof raw === 'string' ? raw.trim() : '';
+  }, [params.q]);
+
+  useEffect(() => {
+    if (!incomingRouteQuery) return;
+
+    const normalizedIncoming = incomingRouteQuery.toLowerCase();
+    if (normalizedIncoming === lastAppliedRouteQueryRef.current) return;
+
+    lastAppliedRouteQueryRef.current = normalizedIncoming;
+    setSearchText(incomingRouteQuery);
+    setSearchQuery(incomingRouteQuery);
+    setShowSuggestions(false);
+  }, [incomingRouteQuery]);
 
   useEffect(() => {
     setManualInput(manualLocationText);
@@ -702,11 +721,17 @@ export default function ExploreScreen() {
                 setSearchText(value);
                 setShowSuggestions(true);
               }}
+              onSubmitEditing={() => {
+                const nextQuery = searchText.trim();
+                setSearchQuery(nextQuery);
+                setShowSuggestions(false);
+              }}
               placeholder={t('explore.search.placeholder')}
               placeholderTextColor={colors.muted}
               style={[styles.searchInput, { color: colors.text }]}
               autoCorrect={false}
               autoCapitalize="none"
+              returnKeyType="search"
             />
             {!!searchText ? (
               <Pressable

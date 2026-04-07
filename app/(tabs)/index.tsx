@@ -84,7 +84,6 @@ export default function HomeScreen() {
   const timeOfDayPreference = useRecommendationPreferencesStore((s) => s.timeOfDayPreference);
   const setTimeOfDayPreference = useRecommendationPreferencesStore((s) => s.setTimeOfDayPreference);
 
-  const searchRequestIdRef = React.useRef(0);
   const recordingRef = React.useRef<Audio.Recording | null>(null);
 
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -94,6 +93,7 @@ export default function HomeScreen() {
 
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [featured, setFeatured] = useState<DestinationRow | null>(null);
+  const [allDestinations, setAllDestinations] = useState<DestinationRow[]>([]);
   const [popular, setPopular] = useState<DestinationRow[]>([]);
   const [personalized, setPersonalized] = useState<PersonalizedRecommendationsResult | null>(null);
 
@@ -110,8 +110,21 @@ export default function HomeScreen() {
   );
 
   const onPressFilters = useCallback(() => {
-    // placeholder
-  }, []);
+    const query = searchText.trim();
+    if (!query) {
+      router.push('/(tabs)/explore' as any);
+      return;
+    }
+
+    router.push(
+      {
+        pathname: '/(tabs)/explore',
+        params: {
+          q: query,
+        },
+      } as any
+    );
+  }, [searchText]);
 
   // Lấy styles dựa trên state hiện tại
   const styles = useMemo(() => getStyles({ isDarkMode: isDark, screenWidth }), [isDark, screenWidth]);
@@ -132,6 +145,29 @@ export default function HomeScreen() {
       return formatPricePerPerson(value);
     },
     [formatPricePerPerson, t]
+  );
+
+  const normalizeSearchValue = useCallback((value: string) => value.trim().toLowerCase(), []);
+
+  const applySearchText = useCallback(
+    (text: string) => {
+      setSearchText(text);
+
+      const normalizedQuery = normalizeSearchValue(text);
+      if (!normalizedQuery) {
+        setPopular(allDestinations);
+        return;
+      }
+
+      const next = allDestinations.filter((row) => {
+        const name = String(row.name ?? '').toLowerCase();
+        const location = String(row.location ?? '').toLowerCase();
+        return name.includes(normalizedQuery) || location.includes(normalizedQuery);
+      });
+
+      setPopular(next);
+    },
+    [allDestinations, normalizeSearchValue]
   );
 
   const fetchProfile = useCallback(async () => {
@@ -159,16 +195,29 @@ export default function HomeScreen() {
       const featuredDestination = (dests ?? []).find((d) => !!d.is_featured) ?? null;
       setFeatured(featuredDestination);
 
-      setPopular(dests ?? []);
+      setAllDestinations(dests ?? []);
+
+      const query = normalizeSearchValue(searchText);
+      if (!query) {
+        setPopular(dests ?? []);
+      } else {
+        const next = (dests ?? []).filter((row) => {
+          const name = String(row.name ?? '').toLowerCase();
+          const location = String(row.location ?? '').toLowerCase();
+          return name.includes(query) || location.includes(query);
+        });
+        setPopular(next);
+      }
     } catch (err: any) {
       console.warn('fetchDestinations failed:', err?.message ?? err);
       setCategories([]);
       setFeatured(null);
+      setAllDestinations([]);
       setPopular([]);
     } finally {
       setLoadingDestinations(false);
     }
-  }, []);
+  }, [normalizeSearchValue, searchText]);
 
   const fetchPersonalizedRecommendations = useCallback(async () => {
     setLoadingPersonalized(true);
@@ -189,39 +238,16 @@ export default function HomeScreen() {
     }
   }, [effectiveTimeOfDay]);
 
-  const loadData = useCallback(async () => {
-    await fetchDestinations();
-  }, [fetchDestinations]);
-
-  const handleSearch = useCallback(
-    async (text: string) => {
-      const requestId = ++searchRequestIdRef.current;
-
-      try {
-        if (!text.trim()) {
-          await loadData();
-          return;
-        }
-
-        const results = (await destinationService.searchDestinations(text)) as DestinationRow[];
-
-        if (requestId !== searchRequestIdRef.current) return;
-
-        setPopular(results ?? []);
-      } catch (error) {
-        console.error('Lỗi tìm kiếm:', error);
-      }
-    },
-    [loadData]
-  );
-
   const onChangeSearchText = useCallback(
     (text: string) => {
-      setSearchText(text);
-      void handleSearch(text);
+      applySearchText(text);
     },
-    [handleSearch]
+    [applySearchText]
   );
+
+  const onSubmitSearch = useCallback(() => {
+    onPressFilters();
+  }, [onPressFilters]);
 
   const setRecordingAudioMode = useCallback(async (recordingEnabled: boolean) => {
     await Audio.setAudioModeAsync({
@@ -307,8 +333,7 @@ export default function HomeScreen() {
         return;
       }
 
-      setSearchText(query);
-      await handleSearch(query);
+      applySearchText(query);
     } catch (err: any) {
       console.warn('voice transcription failed:', err?.message ?? err);
       Alert.alert(
@@ -318,7 +343,7 @@ export default function HomeScreen() {
     } finally {
       setVoiceSearchState('idle');
     }
-  }, [handleSearch, setRecordingAudioMode, t]);
+  }, [applySearchText, setRecordingAudioMode, t]);
 
   const onPressVoiceSearch = useCallback(() => {
     if (voiceSearchState === 'processing') return;
@@ -668,6 +693,7 @@ export default function HomeScreen() {
               isDarkMode={isDark}
               value={searchText}
               onChangeText={onChangeSearchText}
+              onSubmitEditing={onSubmitSearch}
               onPressFilters={onPressFilters}
               onPressVoiceSearch={onPressVoiceSearch}
               disableVoiceSearch={voiceSearchState === 'processing'}

@@ -13,6 +13,7 @@ type SearchBarProps = {
   placeholder?: string;
   value?: string;
   onChangeText?: (text: string) => void;
+  onSubmitEditing?: () => void;
   onPressFilters?: () => void;
   voiceSearchState?: VoiceSearchState;
   voiceStatusText?: string | null;
@@ -26,6 +27,7 @@ export function SearchBar({
   placeholder,
   value,
   onChangeText,
+  onSubmitEditing,
   onPressFilters,
   voiceSearchState = 'idle',
   voiceStatusText,
@@ -57,6 +59,8 @@ export function SearchBar({
             placeholder={resolvedPlaceholder}
             placeholderTextColor={isDarkMode ? 'rgba(148, 163, 184, 0.6)' : 'rgba(100, 116, 139, 0.6)'}
             style={styles.searchInput}
+            returnKeyType="search"
+            onSubmitEditing={onSubmitEditing}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
           />
