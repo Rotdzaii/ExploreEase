@@ -1,4 +1,5 @@
 import { generateEmbedding } from './aiService';
+import { secureCacheService } from './secureCacheService';
 import { supabase } from './supabase';
 
 export type ReviewRow = {
@@ -93,6 +94,19 @@ type DestinationVectorMatchRow = {
   similarity?: number | null;
 };
 
+type CachedDestinationDetailPayload = {
+  destination: Record<string, any>;
+  cachedAt: string;
+};
+
+export type DestinationDetailLookupResult = {
+  data: Record<string, any> | null;
+  source: 'remote' | 'cache';
+  cachedAt: string | null;
+};
+
+const buildDestinationCacheKey = (destinationId: string) => `destination-detail:${destinationId}`;
+
 export const calculateAverageRating = (
   reviews: { rating: number | null | undefined }[] | null | undefined,
   decimals: number = 1
@@ -141,6 +155,91 @@ export const destinationService = {
 
     if (error) throw error;
     return data;
+  },
+
+  async cacheDestinationDetail(destinationId: string, destinationRow: Record<string, any>) {
+    if (!destinationId.trim()) return;
+    if (!destinationRow || typeof destinationRow !== 'object') return;
+
+    const payload: CachedDestinationDetailPayload = {
+      destination: destinationRow,
+      cachedAt: new Date().toISOString(),
+    };
+
+    try {
+      await secureCacheService.setJson(buildDestinationCacheKey(destinationId), payload);
+    } catch (error) {
+      console.warn('cacheDestinationDetail failed:', error);
+    }
+  },
+
+  async getCachedDestinationById(destinationId: string): Promise<CachedDestinationDetailPayload | null> {
+    const normalizedId = destinationId.trim();
+    if (!normalizedId) return null;
+
+    try {
+      const payload = await secureCacheService.getJson<CachedDestinationDetailPayload>(
+        buildDestinationCacheKey(normalizedId)
+      );
+      if (!payload?.destination || typeof payload.destination !== 'object') return null;
+      return payload;
+    } catch (error) {
+      console.warn('getCachedDestinationById failed:', error);
+      return null;
+    }
+  },
+
+  async getDestinationByIdWithOfflineCache(
+    destinationId: string,
+    options: { isOnline?: boolean } = {}
+  ): Promise<DestinationDetailLookupResult> {
+    const normalizedId = destinationId.trim();
+    if (!normalizedId) {
+      throw new Error('Missing destination id.');
+    }
+
+    const isOnline = options.isOnline !== false;
+    if (!isOnline) {
+      const cachedPayload = await this.getCachedDestinationById(normalizedId);
+      if (!cachedPayload) {
+        throw new Error('OFFLINE_CACHE_MISS');
+      }
+
+      return {
+        data: cachedPayload.destination,
+        source: 'cache',
+        cachedAt: cachedPayload.cachedAt ?? null,
+      };
+    }
+
+    try {
+      const remoteRow = await this.getDestinationById(normalizedId);
+      const normalizedRemoteRow =
+        remoteRow && typeof remoteRow === 'object'
+          ? (remoteRow as Record<string, any>)
+          : null;
+
+      if (normalizedRemoteRow) {
+        await this.cacheDestinationDetail(normalizedId, normalizedRemoteRow);
+      }
+
+      return {
+        data: normalizedRemoteRow,
+        source: 'remote',
+        cachedAt: null,
+      };
+    } catch (remoteError) {
+      const cachedPayload = await this.getCachedDestinationById(normalizedId);
+      if (cachedPayload) {
+        return {
+          data: cachedPayload.destination,
+          source: 'cache',
+          cachedAt: cachedPayload.cachedAt ?? null,
+        };
+      }
+
+      throw remoteError;
+    }
   },
 
   async searchDestinations(query: string) {

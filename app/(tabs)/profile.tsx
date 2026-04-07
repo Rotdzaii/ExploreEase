@@ -297,6 +297,25 @@ export default function ProfileScreen() {
               <Feather name="chevron-right" size={20} color={colors.subtitle} />
             </Pressable>
 
+            <Pressable
+              onPress={() => router.push('/security' as any)}
+              style={({ pressed }) => [styles.settingRow, { borderColor: colors.border, opacity: pressed ? 0.85 : 1 }]}
+              accessibilityRole="button"
+              accessibilityLabel={t('profile.settings.security')}
+            >
+              <View style={styles.rowLeft}>
+                <View style={[styles.iconWrap, { borderColor: colors.border, backgroundColor: 'transparent' }]}>
+                  <Feather name="shield" size={18} color={colors.title} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.rowTitle, { color: colors.rowText }]}>{t('profile.settings.security')}</Text>
+                  <Text style={[styles.rowDesc, { color: colors.subtitle }]}>{t('profile.settings.securitySubtitle')}</Text>
+                </View>
+              </View>
+
+              <Feather name="chevron-right" size={20} color={colors.subtitle} />
+            </Pressable>
+
             {isAdmin ? (
               <Pressable
                 onPress={() => router.push('/admin/dashboard')}

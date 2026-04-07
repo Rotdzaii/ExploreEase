@@ -202,6 +202,7 @@ export default function DestinationDetailScreen() {
   const [loadingDestination, setLoadingDestination] = useState(false);
   const [destinationPrice, setDestinationPrice] = useState<unknown>(null);
   const [destinationRow, setDestinationRow] = useState<any | null>(null);
+  const [isUsingOfflineCache, setIsUsingOfflineCache] = useState(false);
 
   const [isFavorited, setIsFavorited] = useState(false);
   const [loadingFavorite, setLoadingFavorite] = useState(false);
@@ -590,19 +591,44 @@ export default function DestinationDetailScreen() {
     if (!destinationId) return;
     setLoadingDestination(true);
     try {
-      const row = await destinationService.getDestinationById(destinationId);
+      const result = await destinationService.getDestinationByIdWithOfflineCache(destinationId, {
+        isOnline,
+      });
+
+      const row = result.data ?? null;
       setDestinationRow(row ?? null);
       setDestinationCoords(extractCoords(row));
       setDestinationPrice((row as any)?.price ?? null);
+      setIsUsingOfflineCache(result.source === 'cache');
+
+      if (result.source === 'cache') {
+        addNotification({
+          message: t('destination.offline.loadedFromCache'),
+          type: 'warning',
+          durationMs: 3200,
+        });
+      }
     } catch (error) {
       console.warn('fetchDestinationCoords failed:', error);
       setDestinationRow(null);
       setDestinationCoords(null);
       setDestinationPrice(null);
+      setIsUsingOfflineCache(false);
+
+      if (!isOnline) {
+        const reason = String((error as any)?.message ?? '');
+        if (reason.includes('OFFLINE_CACHE_MISS')) {
+          addNotification({
+            message: t('destination.offline.noCachedData'),
+            type: 'error',
+            durationMs: 3600,
+          });
+        }
+      }
     } finally {
       setLoadingDestination(false);
     }
-  }, [destinationId]);
+  }, [addNotification, destinationId, isOnline, t]);
 
   useEffect(() => {
     void refreshReviews();
@@ -1497,6 +1523,16 @@ export default function DestinationDetailScreen() {
 
         <View style={{ paddingHorizontal: s(16), marginTop: s(18) }}>
           <Text style={{ color: contentTitleColor, fontWeight: '900', fontSize: s(18) }}>{t('destination.detail.descriptionTitle')}</Text>
+
+          {isUsingOfflineCache ? (
+            <View style={{ marginTop: s(8), flexDirection: 'row', alignItems: 'center', gap: s(6) }}>
+              <MaterialCommunityIcons name="wifi-off" size={s(14)} color={ExploreEaseColors.primary} />
+              <Text style={{ color: contentMutedColor, fontWeight: '800', fontSize: s(12) }}>
+                {t('destination.offline.badge')}
+              </Text>
+            </View>
+          ) : null}
+
           <Text
             style={{
               color: contentTextColor,
@@ -1782,6 +1818,7 @@ export default function DestinationDetailScreen() {
     draftRating,
     headerHeight,
     imageUrl,
+    isUsingOfflineCache,
     isWritingReview,
     loadingReviews,
     pickReviewPhotos,
