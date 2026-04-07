@@ -53,6 +53,7 @@ export function TimeOfDayToggle({ value, onChange, title }: TimeOfDayToggleProps
               accessibilityRole="button"
             >
               <Text style={[styles.chipText, { color: active ? '#001018' : palette.idleText }]}>
+                {/* Dynamic i18n key: keep recommendation.timing.{auto,morning,afternoon,evening,night} in translations.ts */}
                 {t(`recommendation.timing.${item}`)}
               </Text>
             </Pressable>

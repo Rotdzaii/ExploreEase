@@ -3,6 +3,7 @@ import { TimeOfDayToggle } from '@/components/home/TimeOfDayToggle';
 import { YouMightAlsoLike, type YouMightAlsoLikeItem } from '@/components/home/YouMightAlsoLike';
 import { ModerationModal, RatingDistribution, ReviewCard, ReviewForm } from '@/components/reviews';
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
+import { useNetwork } from '@/hooks/useNetwork';
 import { useCurrency } from '@/src/context/currency';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
@@ -10,7 +11,7 @@ import { calculateAverageRating as calculateEventAverageRating, eventReviewServi
 import { eventService, getEventStatusByTime, type EventRow, type EventStatus } from '@/src/services/eventService';
 import { itineraryService } from '@/src/services/itineraryService';
 import { recommendationService, resolveTimeOfDayPreference, type PersonalizedRecommendationsResult } from '@/src/services/recommendationService';
-import { reviewService } from '@/src/services/reviewService';
+import { storageService } from '@/src/services/storageService';
 import { supabase } from '@/src/services/supabase';
 import type { TripRow } from '@/src/services/tripService';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
@@ -41,7 +42,7 @@ const FALLBACK_EVENT_IMAGE =
 
 type ReviewSortOption = 'newest' | 'highest' | 'lowest' | 'most-helpful';
 
-const MAX_REVIEW_PHOTOS = 4;
+const MAX_REVIEW_PHOTOS = 3;
 const EVENT_REVIEWS_PAGE_SIZE = 10;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -159,6 +160,7 @@ const toReviewImageUrls = (value: unknown): string[] => {
 export default function EventDetailScreen() {
   const { isDark } = useTheme();
   const { t, language } = useI18n();
+  const { isOnline } = useNetwork();
   const locale = language === 'en' ? 'en-US' : 'vi-VN';
   const { formatPricePerPerson } = useCurrency();
   const { width: screenWidth } = useWindowDimensions();
@@ -816,6 +818,15 @@ export default function EventDetailScreen() {
       return;
     }
 
+    if (!isOnline) {
+      addNotification({
+        message: t('review.error.photoUploadRequiresInternet'),
+        type: 'warning',
+        durationMs: 3200,
+      });
+      return;
+    }
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       addNotification({
@@ -847,7 +858,7 @@ export default function EventDetailScreen() {
       }
       return merged;
     });
-  }, [addNotification, draftPhotoAssets.length, t]);
+  }, [addNotification, draftPhotoAssets.length, isOnline, t]);
 
   const removeDraftPhoto = useCallback((assetUri: string) => {
     setDraftPhotoAssets((prev) => prev.filter((asset) => asset.uri !== assetUri));
@@ -1065,36 +1076,31 @@ export default function EventDetailScreen() {
       return;
     }
 
+    if (!isOnline && draftPhotoAssets.length > 0) {
+      addNotification({
+        message: t('review.error.photoUploadRequiresInternet'),
+        type: 'warning',
+        durationMs: 3200,
+      });
+      return;
+    }
+
     setSubmittingReview(true);
     try {
       const uploadedPhotoUrls: string[] = [];
       if (draftPhotoAssets.length > 0) {
         setUploadingDraftPhotos(true);
         try {
-          for (const asset of draftPhotoAssets.slice(0, MAX_REVIEW_PHOTOS)) {
+          for (const [index, asset] of draftPhotoAssets.slice(0, MAX_REVIEW_PHOTOS).entries()) {
             if (!asset.uri) continue;
 
-            const response = await withTimeout(
-              fetch(asset.uri),
-              15000,
-              t('review.error.uploadTimeout')
-            );
-
-            if (!response.ok) {
-              throw new Error(`${t('review.error.uploadFailed')} (HTTP ${response.status})`);
-            }
-
-            const blob = await withTimeout(
-              response.blob(),
-              10000,
-              t('review.error.uploadTimeout')
-            );
-
             const uploadResult = await withTimeout(
-              reviewService.uploadReviewImage({
-                file: blob,
-                fileName: asset.fileName ?? `event-review-${Date.now()}.jpg`,
-                contentType: asset.mimeType ?? 'image/jpeg',
+              storageService.uploadReviewImage({
+                uri: asset.uri,
+                fileName: asset.fileName ?? `event-review-${Date.now()}-${index + 1}.jpg`,
+                contentType: asset.mimeType ?? undefined,
+                reviewId: eventId,
+                scope: 'event',
               }),
               20000,
               t('review.error.uploadTimeout')
@@ -1168,6 +1174,7 @@ export default function EventDetailScreen() {
     draftPhotoAssets,
     draftRating,
     eventId,
+    isOnline,
     promptLogin,
     refreshReviews,
     t,

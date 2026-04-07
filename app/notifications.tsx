@@ -46,6 +46,26 @@ const TYPE_TITLE_KEYS: Record<NotificationType, string> = {
   system: 'notifications.type.system',
 };
 
+const LEGACY_PLACEHOLDER_TEXTS = new Set(['thong bao moi', 'ban co thong bao moi']);
+
+const normalizeTextForCompare = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const sanitizeLegacyPlaceholderText = (value?: string | null) => {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return '';
+
+  const normalized = normalizeTextForCompare(trimmed);
+  if (LEGACY_PLACEHOLDER_TEXTS.has(normalized)) return '';
+
+  return trimmed;
+};
+
 export default function NotificationsScreen() {
   const { width: screenWidth } = useWindowDimensions();
   const { isDark } = useTheme();
@@ -276,8 +296,12 @@ export default function NotificationsScreen() {
 
   const renderItem = ({ item }: { item: NotificationRow }) => {
     const isUnread = !item.is_read;
-    const title = item.title?.trim() || t('notifications.item.defaultTitle');
-    const message = item.message?.trim() || item.body?.trim() || t('notifications.item.defaultMessage');
+    const sanitizedTitle = sanitizeLegacyPlaceholderText(item.title);
+    const sanitizedMessage = sanitizeLegacyPlaceholderText(item.message);
+    const sanitizedBody = sanitizeLegacyPlaceholderText(item.body);
+
+    const title = sanitizedTitle || t('notifications.item.defaultTitle');
+    const message = sanitizedMessage || sanitizedBody || t('notifications.item.defaultMessage');
 
     return (
       <Pressable
@@ -420,17 +444,24 @@ const normalizeType = (type?: string | null): NotificationType => {
 
 const formatTime = (ts?: string | null, locale: string = 'vi-VN') => {
   if (!ts) return '';
+
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+
+  const includeYear = d.getFullYear() !== new Date().getFullYear();
+
   try {
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString(locale, {
+    const formatter = new Intl.DateTimeFormat(locale, {
       day: '2-digit',
       month: '2-digit',
+      ...(includeYear ? { year: 'numeric' as const } : {}),
       hour: '2-digit',
       minute: '2-digit',
     });
+
+    return formatter.format(d);
   } catch {
-    return '';
+    return d.toLocaleString(locale);
   }
 };
 

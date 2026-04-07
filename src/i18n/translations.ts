@@ -202,7 +202,7 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
     'notifications.markAllReadAccessibility': 'Đánh dấu tất cả đã đọc',
     'notifications.markAllUpdating': 'Đang cập nhật...',
     'notifications.markAllDone': 'Đã đọc hết',
-    'notifications.emptyTitle': 'Chưa có thông báo',
+    'notifications.emptyTitle': 'Bạn không có thông báo nào',
     'notifications.emptyDescription': 'Khi có tương tác mới (phản hồi đánh giá, trạng thái sự kiện...), thông báo sẽ hiện ở đây.',
     'notifications.popover.empty': 'Không có thông báo gần đây.',
     'notifications.popover.viewAll': 'Xem tất cả thông báo',
@@ -614,6 +614,7 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
 
     'review.success.submitDestination': 'Đã gửi đánh giá điểm đến.',
     'review.success.submitEvent': 'Đã gửi đánh giá sự kiện.',
+    'review.success.submitQueuedOffline': 'Bạn đang ngoại tuyến. Đánh giá văn bản đã được lưu và sẽ tự đồng bộ khi có mạng.',
     'review.success.reportDestination': 'Đã gửi báo cáo đánh giá.',
     'review.success.reportEvent': 'Đã gửi báo cáo đánh giá sự kiện.',
     'review.success.replyDestination': 'Đã phản hồi đánh giá.',
@@ -621,6 +622,7 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
 
     'review.error.uploadTimeout': 'Tải ảnh quá lâu. Vui lòng thử lại.',
     'review.error.uploadFailed': 'Không thể tải ảnh đánh giá.',
+    'review.error.photoUploadRequiresInternet': 'Tải ảnh đánh giá cần kết nối Internet.',
     'review.error.submitFailed': 'Không thể gửi đánh giá. {reason}',
     'review.error.rlsBlocked': 'Không thể lưu đánh giá do chính sách truy cập (RLS).',
     'review.error.genericTryAgain': 'Vui lòng thử lại sau.',
@@ -864,7 +866,7 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
     'notifications.markAllReadAccessibility': 'Mark all as read',
     'notifications.markAllUpdating': 'Updating...',
     'notifications.markAllDone': 'Mark all read',
-    'notifications.emptyTitle': 'No notifications yet',
+    'notifications.emptyTitle': 'You have no notifications',
     'notifications.emptyDescription': 'New interactions (review replies, event status updates, etc.) will appear here.',
     'notifications.popover.empty': 'No recent notifications.',
     'notifications.popover.viewAll': 'View all notifications',
@@ -1276,6 +1278,7 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
 
     'review.success.submitDestination': 'Destination review submitted.',
     'review.success.submitEvent': 'Event review submitted.',
+    'review.success.submitQueuedOffline': 'You are offline. Text review was saved locally and will sync later.',
     'review.success.reportDestination': 'Review report submitted.',
     'review.success.reportEvent': 'Event review report submitted.',
     'review.success.replyDestination': 'Review reply submitted.',
@@ -1283,6 +1286,7 @@ const dictionaries: Record<AppLanguage, Record<string, string>> = {
 
     'review.error.uploadTimeout': 'Image upload timed out. Please try again.',
     'review.error.uploadFailed': 'Failed to upload review images.',
+    'review.error.photoUploadRequiresInternet': 'Photo upload requires internet connection.',
     'review.error.submitFailed': 'Unable to submit review. {reason}',
     'review.error.rlsBlocked': 'Unable to save review due to access policy (RLS).',
     'review.error.genericTryAgain': 'Please try again later.',

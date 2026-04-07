@@ -1,3 +1,5 @@
+import { translate } from '@/src/i18n/translations';
+import { useLanguageStore } from '@/src/store/useLanguageStore';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
@@ -10,8 +12,13 @@ type LocalNotificationInput = {
 let isInitialized = false;
 let hasRequestedPermissions = false;
 
-const FALLBACK_TITLE = 'Thong bao moi';
-const FALLBACK_MESSAGE = 'Ban co thong bao moi';
+const getLocalizedFallbackContent = () => {
+  const language = useLanguageStore.getState().language;
+  return {
+    title: translate(language, 'notifications.item.defaultTitle'),
+    message: translate(language, 'notifications.item.defaultMessage'),
+  };
+};
 
 export async function initializeLocalNotificationsAsync() {
   if (Platform.OS === 'web') return;
@@ -49,8 +56,9 @@ export async function initializeLocalNotificationsAsync() {
 export async function presentLocalNotificationAsync(input: LocalNotificationInput) {
   if (Platform.OS === 'web') return;
 
-  const title = input.title?.trim() || FALLBACK_TITLE;
-  const body = input.message?.trim() || FALLBACK_MESSAGE;
+  const fallbackContent = getLocalizedFallbackContent();
+  const title = input.title?.trim() || fallbackContent.title;
+  const body = input.message?.trim() || fallbackContent.message;
 
   await Notifications.scheduleNotificationAsync({
     content: {

@@ -73,6 +73,7 @@ export function YouMightAlsoLike({
   );
 
   const derivedSubtitle = useMemo(() => {
+    // Dynamic i18n key: keep recommendation.timing.{auto,morning,afternoon,evening,night} in translations.ts.
     const timeOfDayLabel = t(`recommendation.timing.${timeOfDay}`);
     const travelStyleKey = resolveTravelStyleKey(travelStyle);
     if (!travelStyleKey) {

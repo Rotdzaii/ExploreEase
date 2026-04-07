@@ -36,6 +36,7 @@ import { itineraryService } from '@/src/services/itineraryService';
 import { offlineSyncService } from '@/src/services/offlineSyncService';
 import { recommendationService, resolveTimeOfDayPreference, type PersonalizedRecommendationsResult } from '@/src/services/recommendationService';
 import { reviewService } from '@/src/services/reviewService';
+import { storageService } from '@/src/services/storageService';
 import { supabase } from '@/src/services/supabase';
 import { tripService, type TripRow } from '@/src/services/tripService';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
@@ -56,7 +57,7 @@ type DetailParams = {
 
 type ReviewSortOption = 'newest' | 'highest' | 'lowest' | 'most-helpful';
 
-const MAX_REVIEW_PHOTOS = 4;
+const MAX_REVIEW_PHOTOS = 3;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -798,6 +799,15 @@ export default function DestinationDetailScreen() {
       return;
     }
 
+    if (!isOnline) {
+      addNotification({
+        message: t('review.error.photoUploadRequiresInternet'),
+        type: 'warning',
+        durationMs: 3200,
+      });
+      return;
+    }
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       addNotification({
@@ -829,7 +839,7 @@ export default function DestinationDetailScreen() {
       }
       return merged;
     });
-  }, [addNotification, draftPhotoAssets.length, t]);
+  }, [addNotification, draftPhotoAssets.length, isOnline, t]);
 
   const removeDraftPhoto = useCallback((assetUri: string) => {
     setDraftPhotoAssets((prev) => prev.filter((asset) => asset.uri !== assetUri));
@@ -1060,6 +1070,14 @@ export default function DestinationDetailScreen() {
 
     if (!isOnline) {
       try {
+        if (draftPhotoAssets.length > 0) {
+          addNotification({
+            message: t('review.error.photoUploadRequiresInternet'),
+            type: 'warning',
+            durationMs: 3200,
+          });
+        }
+
         await offlineSyncService.enqueuePendingReview({
           user_id: currentUserId,
           destination_id: destinationId,
@@ -1074,7 +1092,7 @@ export default function DestinationDetailScreen() {
         setIsWritingReview(false);
 
         addNotification({
-          message: 'You are offline. Review saved locally and will sync later.',
+          message: t('review.success.submitQueuedOffline'),
           type: 'warning',
           durationMs: 4200,
         });
@@ -1095,30 +1113,16 @@ export default function DestinationDetailScreen() {
       if (draftPhotoAssets.length > 0) {
         setUploadingDraftPhotos(true);
         try {
-          for (const asset of draftPhotoAssets.slice(0, MAX_REVIEW_PHOTOS)) {
+          for (const [index, asset] of draftPhotoAssets.slice(0, MAX_REVIEW_PHOTOS).entries()) {
             if (!asset.uri) continue;
 
-            const response = await withTimeout(
-              fetch(asset.uri),
-              15000,
-              t('review.error.uploadTimeout')
-            );
-
-            if (!response.ok) {
-              throw new Error(`${t('review.error.uploadFailed')} (HTTP ${response.status})`);
-            }
-
-            const blob = await withTimeout(
-              response.blob(),
-              10000,
-              t('review.error.uploadTimeout')
-            );
-
             const uploadResult = await withTimeout(
-              reviewService.uploadReviewImage({
-                file: blob,
-                fileName: asset.fileName ?? `review-${Date.now()}.jpg`,
-                contentType: asset.mimeType ?? 'image/jpeg',
+              storageService.uploadReviewImage({
+                uri: asset.uri,
+                fileName: asset.fileName ?? `destination-review-${Date.now()}-${index + 1}.jpg`,
+                contentType: asset.mimeType ?? undefined,
+                reviewId: destinationId,
+                scope: 'destination',
               }),
               20000,
               t('review.error.uploadTimeout')

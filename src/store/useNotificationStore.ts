@@ -43,6 +43,7 @@ type NotificationState = {
 const makeId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 export const useNotificationStore = create<NotificationState>((set, get) => ({
+  // Keep default state empty; never seed placeholder/mock notifications.
   notifications: [],
   unreadCount: 0,
   activeToastId: null,
