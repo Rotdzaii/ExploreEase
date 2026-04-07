@@ -1,3 +1,4 @@
+import { generateEmbedding } from './aiService';
 import { supabase } from './supabase';
 
 export type ReviewRow = {
@@ -37,6 +38,7 @@ export type DestinationDiscoveryRow = {
   price?: number | string | null;
   rating?: number | null;
   image_url?: string | null;
+  similarity?: number | null;
   category_id?: string | number | null;
   latitude?: number | null;
   longitude?: number | null;
@@ -84,6 +86,11 @@ export type DiscoveryQueryFilters = {
   sort?: DiscoverySortOption;
   limit?: number;
   offset?: number;
+};
+
+type DestinationVectorMatchRow = {
+  id: string;
+  similarity?: number | null;
 };
 
 export const calculateAverageRating = (
@@ -146,6 +153,72 @@ export const destinationService = {
 
     if (error) throw error;
     return data;
+  },
+
+  async searchDestinationsByAI(queryText: string): Promise<DestinationDiscoveryRow[]> {
+    const trimmed = queryText.trim();
+    if (!trimmed) return [];
+
+    try {
+      const queryEmbedding = await generateEmbedding(trimmed);
+
+      const { data: matchRowsRaw, error: matchError } = await supabase.rpc('match_destinations', {
+        query_embedding: queryEmbedding,
+        match_threshold: 0.15,
+        match_count: 40,
+      });
+
+      if (matchError) throw matchError;
+
+      const matchRows = (matchRowsRaw ?? []) as DestinationVectorMatchRow[];
+      const orderedIds = matchRows
+        .map((row) => String(row.id ?? '').trim())
+        .filter(Boolean);
+
+      if (orderedIds.length === 0) return [];
+
+      const similarityById = new Map<string, number | null>();
+      for (const row of matchRows) {
+        const id = String(row.id ?? '').trim();
+        if (!id) continue;
+
+        const similarity = typeof row.similarity === 'number' && Number.isFinite(row.similarity)
+          ? row.similarity
+          : null;
+        similarityById.set(id, similarity);
+      }
+
+      const { data: destinationRows, error: destinationError } = await supabase
+        .from('destinations')
+        .select('id, name, location, price, rating, image_url, category_id, latitude, longitude, lat, lng, created_at, categories(name)')
+        .in('id', orderedIds);
+
+      if (destinationError) throw destinationError;
+
+      const rowById = new Map<string, DestinationDiscoveryRow>();
+      for (const row of destinationRows ?? []) {
+        const id = String((row as any)?.id ?? '').trim();
+        if (!id) continue;
+        rowById.set(id, row as DestinationDiscoveryRow);
+      }
+
+      const orderedRows: DestinationDiscoveryRow[] = [];
+      for (const id of orderedIds) {
+        const row = rowById.get(id);
+        if (!row) continue;
+
+        orderedRows.push({
+          ...row,
+          similarity: similarityById.get(id) ?? null,
+        });
+      }
+
+      return orderedRows;
+    } catch (err: any) {
+      console.warn('searchDestinationsByAI fallback to keyword search:', err?.message ?? err);
+      const fallback = await this.searchDestinations(trimmed);
+      return (fallback ?? []) as DestinationDiscoveryRow[];
+    }
   },
 
   async getAutocompleteSuggestions(rawQuery: string, limitPerType: number = 5): Promise<DiscoverySearchSuggestion[]> {

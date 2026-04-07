@@ -117,6 +117,7 @@ export default function ExploreScreen() {
 
   const [searchText, setSearchText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [aiSmartSearchEnabled, setAiSmartSearchEnabled] = useState(false);
   const [suggestions, setSuggestions] = useState<DiscoverySearchSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const lastAppliedRouteQueryRef = useRef<string>('');
@@ -333,38 +334,88 @@ export default function ExploreScreen() {
       setErrorMessage(null);
 
       try {
-        const destinationFilters: DiscoveryQueryFilters = {
-          search: searchQuery || undefined,
-          categoryId: selectedCategoryId,
-          categoryName: selectedCategory !== 'all' ? selectedCategory : null,
-          ratingMin: ratingFilter,
-          priceFilter,
-          sort: sortBy,
-          limit: DISCOVERY_PAGE_SIZE,
-          offset: nextDestinationOffset,
-        };
+        const normalizedSearchQuery = searchQuery.trim();
+        const useAiSmartSearch = aiSmartSearchEnabled && !!normalizedSearchQuery;
 
-        const dateRange = getEventDateRange(eventDateFilter);
-        const eventOrderBy: 'start_time' | 'created_at' | 'title' =
-          sortBy === 'a-z' ? 'title' : sortBy === 'top-rated' ? 'start_time' : (searchQuery ? 'start_time' : 'created_at');
-        const eventAscending: boolean = sortBy === 'a-z' || sortBy === 'top-rated' || !!searchQuery;
+        if (append && useAiSmartSearch) {
+          return;
+        }
 
-        const [destinationRows, eventRows] = await Promise.all([
-          destinationService.getDestinationsForDiscovery(destinationFilters),
-          eventService.getEvents({
-            search: searchQuery || undefined,
-            category: selectedCategory !== 'all' ? selectedCategory : undefined,
-            status: eventStatusFilter,
-            freeOnly: priceFilter === 'free' ? true : undefined,
-            minPrice: priceFilter === 'paid' ? 0.01 : undefined,
-            startFrom: dateRange.startFrom,
-            endTo: dateRange.endTo,
+        let destinationRows: DestinationDiscoveryRow[] = [];
+        let eventRows: EventRow[] = [];
+
+        if (useAiSmartSearch) {
+          const aiRows = await destinationService.searchDestinationsByAI(normalizedSearchQuery);
+
+          const selectedCategoryLower = selectedCategory.toLowerCase();
+          destinationRows = aiRows.filter((row) => {
+            if (selectedCategoryId !== null && typeof selectedCategoryId !== 'undefined') {
+              return String(row.category_id ?? '') === String(selectedCategoryId);
+            }
+
+            if (selectedCategoryLower !== 'all') {
+              const relation = row.categories as any;
+              const categoryName = Array.isArray(relation)
+                ? String(relation[0]?.name ?? '').trim().toLowerCase()
+                : String(relation?.name ?? '').trim().toLowerCase();
+
+              if (categoryName !== selectedCategoryLower) return false;
+            }
+
+            if (typeof ratingFilter === 'number' && Number.isFinite(ratingFilter)) {
+              const ratingValue = typeof row.rating === 'number' ? row.rating : 0;
+              if (ratingValue < ratingFilter) return false;
+            }
+
+            if (priceFilter === 'free') {
+              const priceValue = parseMoneyToNumber(row.price);
+              if (priceValue !== 0) return false;
+            } else if (priceFilter === 'paid') {
+              const priceValue = parseMoneyToNumber(row.price);
+              if (priceValue === null || priceValue <= 0) return false;
+            }
+
+            return true;
+          });
+
+          eventRows = [];
+        } else {
+          const destinationFilters: DiscoveryQueryFilters = {
+            search: normalizedSearchQuery || undefined,
+            categoryId: selectedCategoryId,
+            categoryName: selectedCategory !== 'all' ? selectedCategory : null,
+            ratingMin: ratingFilter,
+            priceFilter,
+            sort: sortBy,
             limit: DISCOVERY_PAGE_SIZE,
-            offset: nextEventOffset,
-            orderBy: eventOrderBy,
-            ascending: eventAscending,
-          }),
-        ]);
+            offset: nextDestinationOffset,
+          };
+
+          const dateRange = getEventDateRange(eventDateFilter);
+          const eventOrderBy: 'start_time' | 'created_at' | 'title' =
+            sortBy === 'a-z' ? 'title' : sortBy === 'top-rated' ? 'start_time' : (normalizedSearchQuery ? 'start_time' : 'created_at');
+          const eventAscending: boolean = sortBy === 'a-z' || sortBy === 'top-rated' || !!normalizedSearchQuery;
+
+          const [destinationRowsRes, eventRowsRes] = await Promise.all([
+            destinationService.getDestinationsForDiscovery(destinationFilters),
+            eventService.getEvents({
+              search: normalizedSearchQuery || undefined,
+              category: selectedCategory !== 'all' ? selectedCategory : undefined,
+              status: eventStatusFilter,
+              freeOnly: priceFilter === 'free' ? true : undefined,
+              minPrice: priceFilter === 'paid' ? 0.01 : undefined,
+              startFrom: dateRange.startFrom,
+              endTo: dateRange.endTo,
+              limit: DISCOVERY_PAGE_SIZE,
+              offset: nextEventOffset,
+              orderBy: eventOrderBy,
+              ascending: eventAscending,
+            }),
+          ]);
+
+          destinationRows = destinationRowsRes;
+          eventRows = eventRowsRes;
+        }
 
         let nextAttractions = destinationRows;
         let nextEvents = eventRows;
@@ -447,10 +498,17 @@ export default function ExploreScreen() {
         const loadedDestinationCount = destinationRows.length;
         const loadedEventCount = eventRows.length;
 
-        setDestinationOffset(nextDestinationOffset + loadedDestinationCount);
-        setEventOffset(nextEventOffset + loadedEventCount);
-        setHasMoreAttractions(loadedDestinationCount >= DISCOVERY_PAGE_SIZE);
-        setHasMoreEvents(loadedEventCount >= DISCOVERY_PAGE_SIZE);
+        if (useAiSmartSearch) {
+          setDestinationOffset(loadedDestinationCount);
+          setEventOffset(0);
+          setHasMoreAttractions(false);
+          setHasMoreEvents(false);
+        } else {
+          setDestinationOffset(nextDestinationOffset + loadedDestinationCount);
+          setEventOffset(nextEventOffset + loadedEventCount);
+          setHasMoreAttractions(loadedDestinationCount >= DISCOVERY_PAGE_SIZE);
+          setHasMoreEvents(loadedEventCount >= DISCOVERY_PAGE_SIZE);
+        }
 
         hasLoadedInitialRef.current = true;
       } catch (err: any) {
@@ -465,6 +523,7 @@ export default function ExploreScreen() {
       effectiveTargetLocation,
       eventDateFilter,
       eventStatusFilter,
+      aiSmartSearchEnabled,
       nearbyOnly,
       priceFilter,
       ratingFilter,
@@ -522,6 +581,7 @@ export default function ExploreScreen() {
     if (!hasLoadedInitialRef.current) return;
     if (loading || loadingMore) return;
     if (errorMessage) return;
+    if (aiSmartSearchEnabled && !!searchQuery.trim()) return;
     if (!hasMoreAttractions && !hasMoreEvents) return;
 
     void loadDiscovery({
@@ -530,7 +590,7 @@ export default function ExploreScreen() {
       destinationOffset,
       eventOffset,
     });
-  }, [destinationOffset, errorMessage, eventOffset, hasMoreAttractions, hasMoreEvents, loadDiscovery, loading, loadingMore]);
+  }, [destinationOffset, errorMessage, eventOffset, hasMoreAttractions, hasMoreEvents, loadDiscovery, loading, loadingMore, aiSmartSearchEnabled, searchQuery]);
 
   const onPickSuggestion = useCallback((item: DiscoverySearchSuggestion) => {
     setSearchText(item.label);
@@ -675,6 +735,7 @@ export default function ExploreScreen() {
 
   const isFiltered =
     !!searchQuery ||
+    aiSmartSearchEnabled ||
     selectedCategory !== 'all' ||
     eventDateFilter !== 'all' ||
     eventStatusFilter !== 'all' ||
@@ -682,6 +743,8 @@ export default function ExploreScreen() {
     priceFilter !== 'all' ||
     sortBy !== 'relevance' ||
     nearbyOnly;
+
+  const isAiSearchActive = aiSmartSearchEnabled && !!searchQuery.trim();
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
@@ -746,6 +809,29 @@ export default function ExploreScreen() {
                 <Feather name="x" size={16} color={colors.muted} />
               </Pressable>
             ) : null}
+          </View>
+
+          <View style={styles.aiToggleRow}>
+            <Pressable
+              onPress={() => setAiSmartSearchEnabled((prev) => !prev)}
+              style={({ pressed }) => [
+                styles.aiToggleButton,
+                { borderColor: colors.border, backgroundColor: colors.inputBg },
+                pressed ? { opacity: 0.84 } : null,
+              ]}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.aiToggleLabel, { color: colors.title }]}>{t('explore.search.aiToggle')}</Text>
+              <View style={[styles.aiToggleStatus, aiSmartSearchEnabled ? styles.aiToggleStatusOn : styles.aiToggleStatusOff]}>
+                <Text style={[styles.aiToggleStatusText, { color: aiSmartSearchEnabled ? '#001018' : colors.text }]}>
+                  {aiSmartSearchEnabled ? t('common.on') : t('common.off')}
+                </Text>
+              </View>
+            </Pressable>
+
+            <Text style={[styles.aiToggleHint, { color: colors.muted }]}>
+              {aiSmartSearchEnabled ? t('explore.search.aiHintOn') : t('explore.search.aiHintOff')}
+            </Text>
           </View>
 
           {showSuggestions && suggestions.length > 0 ? (
@@ -1020,7 +1106,9 @@ export default function ExploreScreen() {
             </View>
 
             {events.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.muted }]}>{t('explore.noEvents')}</Text>
+              <Text style={[styles.emptyText, { color: colors.muted }]}>
+                {isAiSearchActive ? t('explore.search.aiNoEvents') : t('explore.noEvents')}
+              </Text>
             ) : (
               events.map((item) => {
                 const key = `event:${String(item.id)}`;
@@ -1239,6 +1327,49 @@ export default function ExploreScreen() {
         suggestionTag: {
           fontSize: 10,
           fontWeight: '700',
+        },
+        aiToggleRow: {
+          marginTop: 4,
+          gap: 6,
+        },
+        aiToggleButton: {
+          minHeight: 40,
+          borderWidth: 1,
+          borderRadius: 10,
+          paddingHorizontal: 10,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        },
+        aiToggleLabel: {
+          flex: 1,
+          fontSize: 12,
+          fontWeight: '800',
+        },
+        aiToggleStatus: {
+          minWidth: 54,
+          borderRadius: 999,
+          paddingHorizontal: 10,
+          paddingVertical: 4,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        aiToggleStatusOn: {
+          backgroundColor: ExploreEaseColors.primary,
+        },
+        aiToggleStatusOff: {
+          backgroundColor: 'rgba(148,163,184,0.25)',
+        },
+        aiToggleStatusText: {
+          fontSize: 11,
+          fontWeight: '900',
+        },
+        aiToggleHint: {
+          fontSize: 11,
+          fontWeight: '600',
+          lineHeight: 16,
+          paddingHorizontal: 2,
         },
         actionsRow: {
           flexDirection: 'row',
