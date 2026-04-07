@@ -18,7 +18,8 @@ export type AdminEventRow = {
   end_time: string;
   price: number;
   image_url?: string | null;
-  status: AdminEventStatus;
+  status?: AdminEventStatus;
+  approval_status: 'pending' | 'approved' | 'rejected' | string;
   creator_id: string;
   creator_name?: string | null;
   created_at?: string | null;
@@ -43,7 +44,29 @@ export type AdminReviewReportRow = {
   } | null;
 };
 
+export type AdminAnalyticsCounts = {
+  usersCount: number;
+  eventsCount: number;
+  reviewsCount: number;
+  pendingEventsCount: number;
+  approvedEventsCount: number;
+  rejectedEventsCount: number;
+};
+
 const normalizeRole = (role: unknown) => String(role ?? '').trim().toLowerCase();
+
+const safeCount = (value: unknown): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0;
+  return Math.floor(value);
+};
+
+const isMissingRelationError = (error: unknown): boolean => {
+  const message = String((error as { message?: unknown } | null)?.message ?? '').toLowerCase();
+  return (
+    (message.includes('relation') && message.includes('does not exist')) ||
+    (message.includes('table') && message.includes('does not exist'))
+  );
+};
 
 const unique = (values: string[]) => {
   const seen = new Set<string>();
@@ -86,12 +109,6 @@ const ensureAdmin = async (): Promise<string> => {
   return userId;
 };
 
-const mapEventStatusCandidates = (nextStatus: 'approved' | 'rejected') => {
-  return nextStatus === 'approved'
-    ? ['approved', 'incoming']
-    : ['rejected', 'completed'];
-};
-
 export const adminService = {
   async getCurrentUserRole(): Promise<string | null> {
     const { data, error } = await supabase.auth.getUser();
@@ -117,12 +134,89 @@ export const adminService = {
     return role === 'admin';
   },
 
+  async getAnalyticsCounts(): Promise<AdminAnalyticsCounts> {
+    await ensureAdmin();
+
+    const usersPromise = supabase
+      .from('profiles')
+      .select('id', { head: true, count: 'exact' });
+
+    const eventsPromise = supabase
+      .from('events')
+      .select('id', { head: true, count: 'exact' });
+
+    const pendingEventsPromise = supabase
+      .from('events')
+      .select('id', { head: true, count: 'exact' })
+      .eq('approval_status', 'pending');
+
+    const approvedEventsPromise = supabase
+      .from('events')
+      .select('id', { head: true, count: 'exact' })
+      .eq('approval_status', 'approved');
+
+    const rejectedEventsPromise = supabase
+      .from('events')
+      .select('id', { head: true, count: 'exact' })
+      .eq('approval_status', 'rejected');
+
+    const destinationReviewsPromise = supabase
+      .from('reviews')
+      .select('id', { head: true, count: 'exact' });
+
+    const eventReviewsPromise = supabase
+      .from('event_reviews')
+      .select('id', { head: true, count: 'exact' });
+
+    const [
+      usersRes,
+      eventsRes,
+      pendingEventsRes,
+      approvedEventsRes,
+      rejectedEventsRes,
+      destinationReviewsRes,
+      eventReviewsRes,
+    ] = await Promise.all([
+      usersPromise,
+      eventsPromise,
+      pendingEventsPromise,
+      approvedEventsPromise,
+      rejectedEventsPromise,
+      destinationReviewsPromise,
+      eventReviewsPromise,
+    ]);
+
+    if (usersRes.error) throw usersRes.error;
+    if (eventsRes.error) throw eventsRes.error;
+    if (pendingEventsRes.error) throw pendingEventsRes.error;
+    if (approvedEventsRes.error) throw approvedEventsRes.error;
+    if (rejectedEventsRes.error) throw rejectedEventsRes.error;
+    if (destinationReviewsRes.error) throw destinationReviewsRes.error;
+
+    if (eventReviewsRes.error && !isMissingRelationError(eventReviewsRes.error)) {
+      throw eventReviewsRes.error;
+    }
+
+    const destinationReviewCount = safeCount(destinationReviewsRes.count);
+    const eventReviewCount = safeCount(eventReviewsRes.count);
+
+    return {
+      usersCount: safeCount(usersRes.count),
+      eventsCount: safeCount(eventsRes.count),
+      reviewsCount: destinationReviewCount + eventReviewCount,
+      pendingEventsCount: safeCount(pendingEventsRes.count),
+      approvedEventsCount: safeCount(approvedEventsRes.count),
+      rejectedEventsCount: safeCount(rejectedEventsRes.count),
+    };
+  },
+
   async getEventsForApproval(): Promise<AdminEventRow[]> {
     await ensureAdmin();
 
     const { data: events, error } = await supabase
       .from('events')
-      .select('id, title, category, location, start_time, end_time, price, image_url, status, creator_id, created_at')
+      .select('id, title, category, location, start_time, end_time, price, image_url, status, approval_status, creator_id, created_at')
+      .eq('approval_status', 'pending')
       .order('created_at', { ascending: false })
       .limit(400);
 
@@ -163,35 +257,15 @@ export const adminService = {
     const id = eventId.trim();
     if (!id) throw new Error('Event ID is required');
 
-    const candidates = mapEventStatusCandidates(nextStatus);
-    let lastError: unknown = null;
+    const { data, error } = await supabase
+      .from('events')
+      .update({ approval_status: nextStatus })
+      .eq('id', id)
+      .select('id, title, category, location, start_time, end_time, price, image_url, status, approval_status, creator_id, created_at')
+      .single();
 
-    for (const statusCandidate of candidates) {
-      const { data, error } = await supabase
-        .from('events')
-        .update({ status: statusCandidate })
-        .eq('id', id)
-        .select('id, title, category, location, start_time, end_time, price, image_url, status, creator_id, created_at')
-        .single();
-
-      if (!error && data) {
-        return data as AdminEventRow;
-      }
-
-      lastError = error;
-
-      const message = String((error as { message?: unknown } | null)?.message ?? '').toLowerCase();
-      const shouldTryFallback =
-        message.includes('check constraint') ||
-        message.includes('invalid input value') ||
-        message.includes('violates');
-
-      if (!shouldTryFallback) {
-        throw error;
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error('Unable to update event status');
+    if (error) throw error;
+    return data as AdminEventRow;
   },
 
   async getPendingReviewReports(): Promise<AdminReviewReportRow[]> {

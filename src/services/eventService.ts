@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 
 export type EventStatus = 'incoming' | 'ongoing' | 'completed';
+export type EventApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export type EventRow = {
   id: string;
@@ -13,6 +14,7 @@ export type EventRow = {
   image_url?: string | null;
   description?: string | null;
   status: EventStatus;
+  approval_status?: EventApprovalStatus | null;
   latitude?: number | null;
   longitude?: number | null;
   lat?: number | null;
@@ -72,6 +74,25 @@ const ensureAuthenticatedUserId = async (): Promise<string> => {
   return userId;
 };
 
+const ensureAdminUserId = async (): Promise<string> => {
+  const userId = await ensureAuthenticatedUserId();
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const role = String((data as { role?: unknown } | null)?.role ?? '').trim().toLowerCase();
+  if (role !== 'admin') {
+    throw new Error('Admin privileges required');
+  }
+
+  return userId;
+};
+
 const toIsoString = (value: string | Date): string => {
   const parsed = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsed.getTime())) {
@@ -112,6 +133,7 @@ export const eventService = {
     const { data, error } = await supabase
       .from('events')
       .select('category')
+      .eq('approval_status', 'approved')
       .order('category', { ascending: true })
       .limit(safeLimit);
 
@@ -144,7 +166,7 @@ export const eventService = {
   },
 
   async getEvents(filters: GetEventsFilters = {}): Promise<EventRow[]> {
-    let query = supabase.from('events').select('*');
+    let query = supabase.from('events').select('*').eq('approval_status', 'approved');
 
     const search = filters.search?.trim();
     if (search) {
@@ -242,6 +264,7 @@ export const eventService = {
       image_url: input.image_url ?? null,
       description: description || null,
       status,
+      approval_status: 'pending' as const,
       creator_id: creatorId,
     };
 
@@ -323,6 +346,27 @@ export const eventService = {
       .update(payload)
       .eq('id', id)
       .eq('creator_id', userId)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return withLiveStatus(data as EventRow);
+  },
+
+  async updateEventApprovalStatus(eventId: string, nextStatus: EventApprovalStatus): Promise<EventRow> {
+    await ensureAdminUserId();
+
+    const id = eventId?.trim();
+    if (!id) throw new Error('Event ID is required');
+
+    if (!['pending', 'approved', 'rejected'].includes(nextStatus)) {
+      throw new Error('Invalid approval status');
+    }
+
+    const { data, error } = await supabase
+      .from('events')
+      .update({ approval_status: nextStatus })
+      .eq('id', id)
       .select('*')
       .single();
 

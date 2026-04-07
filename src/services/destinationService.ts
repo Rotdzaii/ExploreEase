@@ -164,6 +164,7 @@ export const destinationService = {
       supabase
         .from('events')
         .select('id, title, location')
+        .eq('approval_status', 'approved')
         .ilike('title', `%${query}%`)
         .order('title', { ascending: true })
         .limit(limit),
@@ -252,7 +253,7 @@ export const destinationService = {
     const offset = Math.max(0, filters.offset ?? 0);
 
     const buildQuery = (useRatingColumn: boolean) => {
-      let query = supabase.from('events').select('*');
+      let query = supabase.from('events').select('*').eq('approval_status', 'approved');
 
       if (search) {
         query = query.or(`title.ilike.%${search}%,location.ilike.%${search}%`);

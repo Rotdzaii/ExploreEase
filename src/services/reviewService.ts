@@ -44,6 +44,17 @@ export type ReviewReplyResult = {
   repliedBy: string | null;
 };
 
+export type ModerationReviewRow = {
+  id: string;
+  user_id: string;
+  destination_id: string | number | null;
+  rating: number;
+  comment?: string | null;
+  helpful_count: number;
+  created_at?: string | null;
+  reviewer_name?: string | null;
+};
+
 export type UploadReviewImageInput = {
   file: Blob | ArrayBuffer | Uint8Array;
   fileName?: string;
@@ -66,6 +77,25 @@ const ensureAuthenticatedUserId = async (): Promise<string> => {
   return userId;
 };
 
+const ensureAdminUserId = async (): Promise<string> => {
+  const userId = await ensureAuthenticatedUserId();
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const role = String((data as { role?: unknown } | null)?.role ?? '').trim().toLowerCase();
+  if (role !== 'admin') {
+    throw new Error('Admin privileges required');
+  }
+
+  return userId;
+};
+
 const safeCount = (value: unknown, fallback: number = 0): number => {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n) || n < 0) return fallback;
@@ -84,6 +114,8 @@ const getFileExtension = (fileName?: string, contentType?: string): string => {
 };
 
 const randomSuffix = () => Math.random().toString(36).slice(2, 10);
+
+const unique = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
 
 const isMissingRelationError = (error: unknown): boolean => {
   const message = String((error as any)?.message ?? '').toLowerCase();
@@ -254,6 +286,92 @@ export const reviewService = {
       repliedAt: (data as any).replied_at ?? null,
       repliedBy: (data as any).replied_by ?? null,
     };
+  },
+
+  async getRecentReviewsForModeration(limit: number = 200): Promise<ModerationReviewRow[]> {
+    await ensureAdminUserId();
+
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 200;
+
+    const { data, error } = await supabase
+      .from('reviews')
+      .select('id, user_id, destination_id, rating, comment, helpful_count, created_at')
+      .order('created_at', { ascending: false })
+      .limit(safeLimit);
+
+    if (error) throw error;
+
+    const rows = (data ?? []) as {
+      id: string;
+      user_id: string;
+      destination_id?: string | number | null;
+      rating: number;
+      comment?: string | null;
+      helpful_count?: number | null;
+      created_at?: string | null;
+    }[];
+
+    const userIds = unique(rows.map((row) => String(row.user_id ?? '')).filter(Boolean));
+    const profileNameById = new Map<string, string>();
+
+    if (userIds.length > 0) {
+      const { data: profiles, error: profilesErr } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', userIds);
+
+      if (profilesErr) throw profilesErr;
+
+      for (const profile of profiles ?? []) {
+        const id = String((profile as { id?: unknown })?.id ?? '').trim();
+        const fullName = String((profile as { full_name?: unknown })?.full_name ?? '').trim();
+        if (!id || !fullName) continue;
+        profileNameById.set(id, fullName);
+      }
+    }
+
+    return rows.map((row) => ({
+      id: String(row.id),
+      user_id: String(row.user_id),
+      destination_id: row.destination_id ?? null,
+      rating: Number(row.rating ?? 0),
+      comment: row.comment ?? null,
+      helpful_count: safeCount(row.helpful_count, 0),
+      created_at: row.created_at ?? null,
+      reviewer_name: profileNameById.get(String(row.user_id)) ?? null,
+    }));
+  },
+
+  async deleteReviewAsAdmin(reviewId: string): Promise<void> {
+    await ensureAdminUserId();
+
+    const id = reviewId?.trim();
+    if (!id) throw new Error('Review ID is required');
+
+    const { error: voteDeleteErr } = await supabase
+      .from('review_helpful_votes')
+      .delete()
+      .eq('review_id', id);
+
+    if (voteDeleteErr && !isMissingRelationError(voteDeleteErr)) {
+      throw voteDeleteErr;
+    }
+
+    const { error: reportDeleteErr } = await supabase
+      .from('review_reports')
+      .delete()
+      .eq('review_id', id);
+
+    if (reportDeleteErr && !isMissingRelationError(reportDeleteErr)) {
+      throw reportDeleteErr;
+    }
+
+    const { error: reviewDeleteErr } = await supabase
+      .from('reviews')
+      .delete()
+      .eq('id', id);
+
+    if (reviewDeleteErr) throw reviewDeleteErr;
   },
 
   async uploadReviewImage(input: UploadReviewImageInput): Promise<UploadReviewImageResult> {
