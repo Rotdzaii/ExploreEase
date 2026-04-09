@@ -1,7 +1,11 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
+
+const ONBOARDING_COMPLETED_STORAGE_KEY = 'exploreease.onboarding.completed';
 
 type ProfileRow = {
   full_name: string | null;
+  avatar_url?: string | null;
   nationality: string;
   interests: string[];
 };
@@ -52,6 +56,7 @@ export const profileService = {
 
     return {
       full_name: (data as any)?.full_name ?? null,
+      avatar_url: (data as any)?.avatar_url ?? null,
       nationality: normalizedNationality,
       interests: normalizeInterests((data as any)?.interests),
     };
@@ -83,6 +88,13 @@ export const profileService = {
       .eq('id', resolvedUserId);
 
     if (error) throw error;
+
+    try {
+      await AsyncStorage.setItem(ONBOARDING_COMPLETED_STORAGE_KEY, 'true');
+    } catch {
+      // Best-effort local flag write to avoid blocking profile updates.
+    }
+
     return { interests: normalized };
   },
 };

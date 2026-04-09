@@ -4,39 +4,42 @@ import { useLocation } from '@/hooks/useLocation';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import {
-    destinationService,
-    type DestinationDiscoveryRow,
-    type DiscoveryPriceFilter,
-    type DiscoveryQueryFilters,
-    type DiscoverySearchSuggestion,
-    type DiscoverySortOption,
+  destinationService,
+  type DestinationDiscoveryRow,
+  type DiscoveryPriceFilter,
+  type DiscoveryQueryFilters,
+  type DiscoverySearchSuggestion,
+  type DiscoverySortOption,
 } from '@/src/services/destinationService';
 import { eventService, type EventRow, type EventStatus } from '@/src/services/eventService';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { parseMoneyToNumber } from '@/utils/format';
 import {
-    formatDistance,
-    geocodeLocationText,
-    getEffectiveTargetLocation,
-    getHaversineDistance,
-    resolveEntityCoords,
-    useLocationOverrideStore,
+  formatDistance,
+  geocodeLocationText,
+  getEffectiveTargetLocation,
+  getHaversineDistance,
+  resolveEntityCoords,
+  useLocationOverrideStore,
 } from '@/utils/location';
 import { Feather } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    ImageBackground,
-    Modal,
-    Pressable,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  ImageBackground,
+  Modal,
+  NativeSyntheticEvent,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TextInputSubmitEditingEventData,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 const combineLocalDateTime = (dateText: string, timeText: string): Date | null => {
@@ -115,8 +118,9 @@ export default function ExploreScreen() {
   const [manualInput, setManualInput] = useState(manualLocationText);
   const [resolvingManualLocation, setResolvingManualLocation] = useState(false);
 
-  const [searchText, setSearchText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [submittedSearchQuery, setSubmittedSearchQuery] = useState('');
+  const [searchNonce, setSearchNonce] = useState(0);
   const [aiSmartSearchEnabled, setAiSmartSearchEnabled] = useState(false);
   const [suggestions, setSuggestions] = useState<DiscoverySearchSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -142,9 +146,11 @@ export default function ExploreScreen() {
   const [hasMoreEvents, setHasMoreEvents] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const hasLoadedInitialRef = useRef(false);
+  const loadRequestSeqRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const isLoading = loading || loadingMore;
 
   const [showCreateModal, setShowCreateModal] = useState(false);
 
@@ -206,9 +212,10 @@ export default function ExploreScreen() {
     if (normalizedIncoming === lastAppliedRouteQueryRef.current) return;
 
     lastAppliedRouteQueryRef.current = normalizedIncoming;
-    setSearchText(incomingRouteQuery);
     setSearchQuery(incomingRouteQuery);
+    setSubmittedSearchQuery(incomingRouteQuery);
     setShowSuggestions(false);
+    setSearchNonce((prev) => prev + 1);
   }, [incomingRouteQuery]);
 
   useEffect(() => {
@@ -282,17 +289,9 @@ export default function ExploreScreen() {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearchQuery(searchText.trim());
-    }, 220);
-
-    return () => clearTimeout(timer);
-  }, [searchText]);
-
-  useEffect(() => {
     let cancelled = false;
 
-    if (!searchText.trim()) {
+    if (!searchQuery.trim()) {
       setSuggestions([]);
       setShowSuggestions(false);
       return () => {
@@ -302,7 +301,7 @@ export default function ExploreScreen() {
 
     const timer = setTimeout(async () => {
       try {
-        const rows = await destinationService.getAutocompleteSuggestions(searchText.trim(), 5);
+        const rows = await destinationService.getAutocompleteSuggestions(searchQuery.trim(), 5);
         if (cancelled) return;
 
         setSuggestions(rows);
@@ -318,7 +317,7 @@ export default function ExploreScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [searchText]);
+  }, [searchQuery]);
 
   const loadDiscovery = useCallback(
     async (input: {
@@ -328,13 +327,14 @@ export default function ExploreScreen() {
       eventOffset: number;
     }) => {
       const { showSpinner, append, destinationOffset: nextDestinationOffset, eventOffset: nextEventOffset } = input;
+      const requestSeq = ++loadRequestSeqRef.current;
 
       if (showSpinner) setLoading(true);
       if (append) setLoadingMore(true);
       setErrorMessage(null);
 
       try {
-        const normalizedSearchQuery = searchQuery.trim();
+        const normalizedSearchQuery = submittedSearchQuery.trim();
         const useAiSmartSearch = aiSmartSearchEnabled && !!normalizedSearchQuery;
 
         if (append && useAiSmartSearch) {
@@ -423,6 +423,7 @@ export default function ExploreScreen() {
 
         if (nearbyOnly) {
           if (!effectiveTargetLocation) {
+            if (requestSeq !== loadRequestSeqRef.current) return;
             if (!append) {
               setAttractions([]);
               setEvents([]);
@@ -485,6 +486,8 @@ export default function ExploreScreen() {
           }
         }
 
+        if (requestSeq !== loadRequestSeqRef.current) return;
+
         if (append) {
           setAttractions((prev) => [...prev, ...nextAttractions]);
           setEvents((prev) => [...prev, ...nextEvents]);
@@ -512,9 +515,11 @@ export default function ExploreScreen() {
 
         hasLoadedInitialRef.current = true;
       } catch (err: any) {
+        if (requestSeq !== loadRequestSeqRef.current) return;
         const msg = err?.message ?? t('explore.error.loadResults');
         setErrorMessage(msg);
       } finally {
+        if (requestSeq !== loadRequestSeqRef.current) return;
         if (showSpinner) setLoading(false);
         if (append) setLoadingMore(false);
       }
@@ -527,7 +532,7 @@ export default function ExploreScreen() {
       nearbyOnly,
       priceFilter,
       ratingFilter,
-      searchQuery,
+      submittedSearchQuery,
       selectedCategory,
       selectedCategoryId,
       sortBy,
@@ -547,7 +552,7 @@ export default function ExploreScreen() {
       destinationOffset: 0,
       eventOffset: 0,
     });
-  }, [loadDiscovery]);
+  }, [loadDiscovery, searchNonce]);
 
   const onRefresh = useCallback(() => {
     hasLoadedInitialRef.current = false;
@@ -564,8 +569,9 @@ export default function ExploreScreen() {
   }, [loadDiscovery]);
 
   const onResetFilters = useCallback(() => {
-    setSearchText('');
     setSearchQuery('');
+    setSubmittedSearchQuery('');
+    setSearchNonce((prev) => prev + 1);
     setSuggestions([]);
     setShowSuggestions(false);
     setSelectedCategory('all');
@@ -581,7 +587,7 @@ export default function ExploreScreen() {
     if (!hasLoadedInitialRef.current) return;
     if (loading || loadingMore) return;
     if (errorMessage) return;
-    if (aiSmartSearchEnabled && !!searchQuery.trim()) return;
+    if (aiSmartSearchEnabled && !!submittedSearchQuery.trim()) return; //Nếu có đk, nâng cấp lên realtime nếu thoải mái được request từ model
     if (!hasMoreAttractions && !hasMoreEvents) return;
 
     void loadDiscovery({
@@ -590,13 +596,26 @@ export default function ExploreScreen() {
       destinationOffset,
       eventOffset,
     });
-  }, [destinationOffset, errorMessage, eventOffset, hasMoreAttractions, hasMoreEvents, loadDiscovery, loading, loadingMore, aiSmartSearchEnabled, searchQuery]);
+  }, [destinationOffset, errorMessage, eventOffset, hasMoreAttractions, hasMoreEvents, loadDiscovery, loading, loadingMore, aiSmartSearchEnabled, submittedSearchQuery]);
+
+  const executeSmartSearch = useCallback((eventOrText?: NativeSyntheticEvent<TextInputSubmitEditingEventData> | string) => {
+    if (isLoading) return;
+
+    const nextText =
+      typeof eventOrText === 'string'
+        ? eventOrText
+        : (eventOrText?.nativeEvent?.text ?? searchQuery);
+    const nextQuery = nextText.trim();
+
+    setSearchQuery(nextText);
+    setSubmittedSearchQuery(nextQuery);
+    setShowSuggestions(false);
+    setSearchNonce((prev) => prev + 1);
+  }, [isLoading, searchQuery]);
 
   const onPickSuggestion = useCallback((item: DiscoverySearchSuggestion) => {
-    setSearchText(item.label);
-    setSearchQuery(item.label);
-    setShowSuggestions(false);
-  }, []);
+    executeSmartSearch(item.label);
+  }, [executeSmartSearch]);
 
   const applyManualLocation = useCallback(async () => {
     const text = manualInput.trim();
@@ -734,7 +753,7 @@ export default function ExploreScreen() {
   }, []);
 
   const isFiltered =
-    !!searchQuery ||
+    !!submittedSearchQuery ||
     aiSmartSearchEnabled ||
     selectedCategory !== 'all' ||
     eventDateFilter !== 'all' ||
@@ -744,7 +763,7 @@ export default function ExploreScreen() {
     sortBy !== 'relevance' ||
     nearbyOnly;
 
-  const isAiSearchActive = aiSmartSearchEnabled && !!searchQuery.trim();
+  const isAiSearchActive = aiSmartSearchEnabled && !!submittedSearchQuery.trim();
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
@@ -779,36 +798,45 @@ export default function ExploreScreen() {
           <View style={[styles.searchWrap, { backgroundColor: colors.inputBg, borderColor: colors.border }]}> 
             <Feather name="search" size={16} color={colors.muted} />
             <TextInput
-              value={searchText}
-              onChangeText={(value) => {
-                setSearchText(value);
-                setShowSuggestions(true);
-              }}
-              onSubmitEditing={() => {
-                const nextQuery = searchText.trim();
-                setSearchQuery(nextQuery);
-                setShowSuggestions(false);
-              }}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onSubmitEditing={executeSmartSearch}
               placeholder={t('explore.search.placeholder')}
               placeholderTextColor={colors.muted}
               style={[styles.searchInput, { color: colors.text }]}
               autoCorrect={false}
               autoCapitalize="none"
               returnKeyType="search"
+              editable={!isLoading}
             />
-            {!!searchText ? (
+            {!!searchQuery ? (
               <Pressable
                 onPress={() => {
-                  setSearchText('');
                   setSearchQuery('');
+                  setSubmittedSearchQuery('');
+                  setSearchNonce((prev) => prev + 1);
                   setSuggestions([]);
                   setShowSuggestions(false);
                 }}
+                disabled={isLoading}
                 accessibilityRole="button"
               >
                 <Feather name="x" size={16} color={colors.muted} />
               </Pressable>
             ) : null}
+            <TouchableOpacity
+              onPress={() => executeSmartSearch()}
+              disabled={isLoading}
+              activeOpacity={0.84}
+              style={[
+                styles.searchSubmitBtn,
+                isLoading ? { opacity: 0.6 } : null,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={t('explore.search.label')}
+            >
+              <Feather name="arrow-right" size={16} color="#001018" />
+            </TouchableOpacity>
           </View>
 
           <View style={styles.aiToggleRow}>
@@ -1300,6 +1328,14 @@ export default function ExploreScreen() {
           flex: 1,
           fontSize: 14,
           paddingVertical: 10,
+        },
+        searchSubmitBtn: {
+          minWidth: 32,
+          minHeight: 32,
+          borderRadius: 8,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: ExploreEaseColors.primary,
         },
         suggestionList: {
           borderWidth: 1,

@@ -62,11 +62,17 @@ EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=
 EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=
 EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=
 EXPO_PUBLIC_GROQ_API_KEY=
+EXPO_PUBLIC_GEMINI_API_KEY=
+EXPO_PUBLIC_GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+EXPO_PUBLIC_GEMINI_INTENT_MODEL=gemini-2.5-flash
 ```
 
 Lưu ý:
 - Lấy các Client ID này từ Google Cloud Console (OAuth 2.0 Client IDs).
 - `EXPO_PUBLIC_GROQ_API_KEY` lấy từ Groq Console (API Keys) để gọi Whisper transcription.
+- `EXPO_PUBLIC_GEMINI_API_KEY` dùng cho AI semantic search (embedding).
+- `EXPO_PUBLIC_GEMINI_EMBEDDING_MODEL` là tùy chọn, mặc định `gemini-embedding-001`.
+- `EXPO_PUBLIC_GEMINI_INTENT_MODEL` là tùy chọn cho bước hiểu truy vấn Smart Search, mặc định `gemini-2.5-flash`.
 - Sau khi thay đổi `.env`, hãy dừng và chạy lại Expo để nạp biến môi trường mới.
 
 ## 4. Hướng dẫn chạy dự án (Running the Project)

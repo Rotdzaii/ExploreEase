@@ -58,6 +58,8 @@ type DetailParams = {
 type ReviewSortOption = 'newest' | 'highest' | 'lowest' | 'most-helpful';
 
 const MAX_REVIEW_PHOTOS = 3;
+const DESTINATION_OPEN_HOUR = 8;
+const DESTINATION_CLOSE_HOUR = 22;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -203,6 +205,7 @@ export default function DestinationDetailScreen() {
   const [destinationPrice, setDestinationPrice] = useState<unknown>(null);
   const [destinationRow, setDestinationRow] = useState<any | null>(null);
   const [isUsingOfflineCache, setIsUsingOfflineCache] = useState(false);
+  const [nowTickMs, setNowTickMs] = useState(() => Date.now());
 
   const [isFavorited, setIsFavorited] = useState(false);
   const [loadingFavorite, setLoadingFavorite] = useState(false);
@@ -674,6 +677,16 @@ export default function DestinationDetailScreen() {
     };
   }, [destinationId]);
 
+  useEffect(() => {
+    const timerId = setInterval(() => {
+      setNowTickMs(Date.now());
+    }, 60_000);
+
+    return () => {
+      clearInterval(timerId);
+    };
+  }, []);
+
   const onToggleFavorite = useCallback(async () => {
     if (!destinationId) return;
     if (togglingFavorite) return;
@@ -753,6 +766,15 @@ export default function DestinationDetailScreen() {
     );
     return formatDistance(meters);
   }, [destinationCoords, location]);
+
+  const isOpenNow = useMemo(() => {
+    const now = new Date(nowTickMs);
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    const openingMinutes = DESTINATION_OPEN_HOUR * 60;
+    const closingMinutes = DESTINATION_CLOSE_HOUR * 60;
+
+    return minutes >= openingMinutes && minutes < closingMinutes;
+  }, [nowTickMs]);
 
   const canReplyToReviews = useMemo(() => {
     if (isAdmin) return true;
@@ -1034,6 +1056,7 @@ export default function DestinationDetailScreen() {
             ? {
                 ...row,
                 reply_text: result.replyText,
+                admin_reply: result.adminReply,
                 replied_at: result.repliedAt,
                 replied_by: result.repliedBy,
               }
@@ -1371,7 +1394,7 @@ export default function DestinationDetailScreen() {
           isHelpful={isHelpful}
           helpfulLoading={isHelpfulLoading}
           canReply={canReplyToReviews}
-          replyText={item.reply_text ?? null}
+          replyText={item.admin_reply ?? item.reply_text ?? null}
           replyDraft={replyDraft}
           replyLoading={isReplyLoading}
           onChangeReplyDraft={(value) =>
@@ -1532,6 +1555,50 @@ export default function DestinationDetailScreen() {
               </Text>
             </View>
           ) : null}
+
+          <View
+            style={{
+              marginTop: s(10),
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: s(8),
+              flexWrap: 'wrap',
+            }}
+          >
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: s(6),
+                borderRadius: 999,
+                borderWidth: 1,
+                paddingHorizontal: s(10),
+                paddingVertical: s(6),
+                borderColor: isOpenNow ? 'rgba(34,197,94,0.42)' : 'rgba(239,68,68,0.40)',
+                backgroundColor: isOpenNow ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.10)',
+              }}
+            >
+              <MaterialCommunityIcons
+                name={isOpenNow ? 'clock-check-outline' : 'clock-alert-outline'}
+                size={s(14)}
+                color={isOpenNow ? '#22c55e' : '#ef4444'}
+              />
+              <Text
+                style={{
+                  fontWeight: '900',
+                  fontSize: s(12),
+                  color: isOpenNow ? '#22c55e' : '#ef4444',
+                }}
+              >
+                {isOpenNow ? t('destination.hours.openNow') : t('destination.hours.closed')}
+              </Text>
+            </View>
+
+            <Text style={{ color: contentMutedColor, fontWeight: '700', fontSize: s(12) }}>
+              {t('destination.hours.title')}: {t('destination.hours.defaultRange')}
+            </Text>
+          </View>
 
           <Text
             style={{
@@ -1724,6 +1791,10 @@ export default function DestinationDetailScreen() {
             </Pressable>
           </View>
 
+          <Text style={{ marginTop: s(8), color: contentMutedColor, fontWeight: '800', fontSize: s(12) }}>
+            {t('review.distribution.title')}
+          </Text>
+
           <RatingDistribution entries={ratingDistribution} isDark={isDark} scale={s} />
 
           <View style={[styles.reviewSortRow, { marginTop: s(10), columnGap: s(8), rowGap: s(8) }]}>
@@ -1819,6 +1890,7 @@ export default function DestinationDetailScreen() {
     headerHeight,
     imageUrl,
     isUsingOfflineCache,
+    isOpenNow,
     isWritingReview,
     loadingReviews,
     pickReviewPhotos,

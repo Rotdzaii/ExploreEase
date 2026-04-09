@@ -1,4 +1,5 @@
 import { NotificationPopover } from '@/components/notifications/NotificationPopover';
+import { useAuth } from '@/src/context/auth';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
@@ -10,6 +11,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
+  const { session } = useAuth();
   const insets = useSafeAreaInsets();
 
   const { isDark } = useTheme();
@@ -112,6 +114,10 @@ export default function TabLayout() {
     router.push('/notifications' as any);
   }, []);
 
+  if (!session) {
+    return <View style={styles.authGatePlaceholder} />;
+  }
+
   return (
     <View style={styles.root}>
       <Tabs
@@ -210,6 +216,9 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
+  authGatePlaceholder: {
+    flex: 1,
+  },
   root: {
     flex: 1,
   },

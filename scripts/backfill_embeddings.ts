@@ -1,6 +1,7 @@
 #!/usr/bin/env ts-node
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import 'dotenv/config';
 import { generateEmbedding } from '../src/services/aiService';
 
 type CategoryRelation =
@@ -20,6 +21,8 @@ type DestinationRow = {
 const EMBEDDING_DIMENSION = 384;
 const FETCH_PAGE_SIZE = 200;
 const EMBEDDING_DELAY_MS = 160;
+const FORCE_REEMBED_ALL =
+  /^1|true|yes$/i.test(String(process.env.FORCE_REEMBED_ALL ?? '').trim()) || process.argv.includes('--all');
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -88,19 +91,24 @@ const toVectorLiteral = (values: number[]): string => {
   return `[${normalized.join(',')}]`;
 };
 
-const fetchAllDestinationsMissingEmbedding = async (
+const fetchAllDestinationsForBackfill = async (
   supabase: SupabaseClient<any, 'public', any, any, any>
 ): Promise<DestinationRow[]> => {
   const rows: DestinationRow[] = [];
   let offset = 0;
 
   while (true) {
-    const { data, error } = await supabase
+    let query = supabase
       .from('destinations')
       .select('id, name, location, description, categories(name)')
-      .is('embedding', null)
       .order('id', { ascending: true })
       .range(offset, offset + FETCH_PAGE_SIZE - 1);
+
+    if (!FORCE_REEMBED_ALL) {
+      query = query.is('embedding', null);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -125,15 +133,27 @@ async function main() {
     },
   });
 
-  console.log('[start] Loading destinations with NULL embeddings...');
-  const pendingRows = await fetchAllDestinationsMissingEmbedding(supabase);
+  console.log(
+    FORCE_REEMBED_ALL
+      ? '[start] Loading all destinations for full re-embedding...'
+      : '[start] Loading destinations with NULL embeddings...'
+  );
+  const pendingRows = await fetchAllDestinationsForBackfill(supabase);
 
   if (pendingRows.length === 0) {
-    console.log('[done] No destinations need backfill.');
+    console.log(
+      FORCE_REEMBED_ALL
+        ? '[done] No destinations found to re-embed.'
+        : '[done] No destinations need backfill.'
+    );
     return;
   }
 
-  console.log(`[info] Found ${pendingRows.length} destination(s) to backfill.`);
+  console.log(
+    FORCE_REEMBED_ALL
+      ? `[info] Found ${pendingRows.length} destination(s) for full re-embedding.`
+      : `[info] Found ${pendingRows.length} destination(s) to backfill.`
+  );
 
   let successCount = 0;
   let failedCount = 0;

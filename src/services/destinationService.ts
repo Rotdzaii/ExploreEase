@@ -1,4 +1,4 @@
-import { generateEmbedding } from './aiService';
+import { extractTravelSearchIntent, generateEmbedding, type TravelCategoryHint, type TravelIntentType } from './aiService';
 import { secureCacheService } from './secureCacheService';
 import { supabase } from './supabase';
 
@@ -9,6 +9,7 @@ export type ReviewRow = {
   rating: number;
   comment?: string | null;
   helpful_count?: number | null;
+  admin_reply?: string | null;
   reply_text?: string | null;
   replied_at?: string | null;
   replied_by?: string | null;
@@ -36,6 +37,7 @@ export type DestinationDiscoveryRow = {
   id: string | number;
   name: string;
   location?: string | null;
+  description?: string | null;
   price?: number | string | null;
   rating?: number | null;
   image_url?: string | null;
@@ -106,6 +108,378 @@ export type DestinationDetailLookupResult = {
 };
 
 const buildDestinationCacheKey = (destinationId: string) => `destination-detail:${destinationId}`;
+
+type SearchIntentProfile = {
+  key: 'spiritual' | 'beach' | 'mountain' | 'relax';
+  queryTerms: string[];
+  semanticHints: string[];
+  keywordTerms: string[];
+  entityTerms: string[];
+  categoryTerms: string[];
+  boost: number;
+  categoryBoost: number;
+  penaltyTerms?: string[];
+  penalty?: number;
+};
+
+const INTENT_PROFILES: SearchIntentProfile[] = [
+  {
+    key: 'spiritual',
+    queryTerms: [
+      'chua',
+      'den',
+      'tam linh',
+      'cau an',
+      'phat',
+      'pagoda',
+      'temple',
+      'shrine',
+      'worship',
+      'religion',
+      'spiritual',
+      'meditation',
+    ],
+    semanticHints: [
+      'spiritual place',
+      'temple',
+      'pagoda',
+      'shrine',
+      'meditation',
+      'religious heritage',
+      'place of worship',
+    ],
+    keywordTerms: ['pagoda', 'temple', 'shrine', 'spiritual', 'religion', 'worship'],
+    entityTerms: [
+      'pagoda',
+      'temple',
+      'shrine',
+      'chua',
+      'den',
+      'thu vien',
+      'religious',
+      'worship',
+      'spiritual',
+      'phat',
+      'meditation',
+      'prayer',
+    ],
+    categoryTerms: ['culture', 'heritage', 'history', 'religion', 'spiritual', 'cities'],
+    boost: 0.35,
+    categoryBoost: 0.2,
+    penaltyTerms: ['beach', 'waterfall', 'promontory', 'market'],
+    penalty: 0.08,
+  },
+  {
+    key: 'beach',
+    queryTerms: ['bien', 'dao', 'bo bien', 'beach', 'sea', 'ocean', 'coastal'],
+    semanticHints: ['beach', 'coastal scenery', 'ocean view', 'island', 'seaside sunset'],
+    keywordTerms: ['beach', 'sea', 'ocean', 'coast', 'island', 'coastal', 'my khe'],
+    entityTerms: [
+      'beach',
+      'sea',
+      'ocean',
+      'coast',
+      'island',
+      'shore',
+      'my khe',
+      'nha trang beach',
+      'peninsula',
+    ],
+    categoryTerms: ['nature', 'adventure', 'beach', 'beaches'],
+    boost: 0.24,
+    categoryBoost: 0.12,
+    penaltyTerms: ['temple', 'pagoda', 'shrine'],
+    penalty: 0.05,
+  },
+  {
+    key: 'mountain',
+    queryTerms: [
+      'nui',
+      'leo nui',
+      'trek',
+      'trekking',
+      'hiking',
+      'mountain',
+      'hill',
+      'waterfall',
+      'adventure',
+      'phieu luu',
+    ],
+    semanticHints: ['mountain', 'hiking', 'waterfall', 'outdoor adventure', 'scenic hill viewpoint'],
+    keywordTerms: ['mountain', 'hill', 'waterfall', 'trek', 'hiking', 'adventure', 'ba na'],
+    entityTerms: [
+      'mountain',
+      'hill',
+      'waterfall',
+      'trek',
+      'hiking',
+      'adventure',
+      'cable car',
+      'promontory',
+      'peninsula',
+      'ba na',
+    ],
+    categoryTerms: ['adventure', 'nature', 'mountain', 'mountains'],
+    boost: 0.24,
+    categoryBoost: 0.14,
+    penaltyTerms: ['market'],
+    penalty: 0.04,
+  },
+  {
+    key: 'relax',
+    queryTerms: ['chill', 'thu gian', 'nghi ngoi', 'relax', 'calm', 'yen binh', 'healing', 'sunset'],
+    semanticHints: ['relaxing place', 'quiet scenery', 'sunset walk', 'calm atmosphere', 'peaceful view'],
+    keywordTerms: ['relax', 'calm', 'quiet', 'sunset', 'sunrise', 'peaceful', 'chill'],
+    entityTerms: ['calm', 'quiet', 'sunrise', 'sunset', 'relax', 'chill', 'peaceful', 'gentle', 'viewpoint'],
+    categoryTerms: ['nature', 'culture', 'beaches', 'mountains', 'cities'],
+    boost: 0.2,
+    categoryBoost: 0.08,
+    penaltyTerms: ['crowd', 'busy', 'market'],
+    penalty: 0.03,
+  },
+];
+
+const removeDiacriticsForIntent = (value: string) =>
+  value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+const normalizeIntentText = (value: unknown) =>
+  removeDiacriticsForIntent(String(value ?? '').trim().toLowerCase());
+
+const hasAnyIntentTerm = (text: string, terms: string[]) =>
+  terms.some((term) => text.includes(term));
+
+const uniqueTerms = (items: string[]) => Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+
+const detectIntents = (rawQuery: string): SearchIntentProfile[] => {
+  const normalizedQuery = normalizeIntentText(rawQuery);
+  if (!normalizedQuery) return [];
+
+  return INTENT_PROFILES.filter((profile) => hasAnyIntentTerm(normalizedQuery, profile.queryTerms));
+};
+
+const CATEGORY_HINT_DB_TERMS: Record<TravelCategoryHint, string[]> = {
+  'Thiên nhiên': ['Thiên nhiên', 'Nature', 'Biển', 'Núi', 'Lake', 'Forest', 'Scenic'],
+  'Văn hóa': ['Văn hóa', 'Culture', 'Heritage', 'History', 'Spiritual', 'Temple'],
+  'Giải trí': ['Giải trí', 'Entertainment', 'Nightlife', 'Theme Park', 'Urban'],
+  'Ẩm thực': ['Ẩm thực', 'Food', 'Cuisine', 'Market', 'Street Food'],
+  'Nghỉ dưỡng': ['Nghỉ dưỡng', 'Resort', 'Wellness', 'Retreat', 'Relax'],
+  'Mạo hiểm': ['Mạo hiểm', 'Adventure', 'Trekking', 'Hiking', 'Outdoor'],
+};
+
+const INTENT_TYPE_CATEGORY_TERMS: Record<TravelIntentType, string[]> = {
+  spiritual: ['Chùa', 'Đền', 'Miếu', 'Di tích lịch sử', 'Tâm linh', 'Nghĩa trang liệt sĩ', 'Văn hóa'],
+  nature: ['Thiên nhiên', 'Nature', 'Núi', 'Rừng', 'Lake', 'Scenic'],
+  beach: ['Biển', 'Beach', 'Coastal', 'Island'],
+  adventure: ['Mạo hiểm', 'Adventure', 'Trekking', 'Hiking', 'Outdoor'],
+  food: ['Ẩm thực', 'Food', 'Cuisine', 'Market', 'Street Food'],
+  unknown: [],
+};
+
+const sanitizeForIlikeValue = (value: string) =>
+  String(value ?? '')
+    .replace(/[,%()'"\\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const QUERY_STOPWORDS = new Set([
+  'di',
+  'đi',
+  'toi',
+  'tới',
+  'den',
+  'đến',
+  'du',
+  'lich',
+  'dulich',
+  'cho',
+  'tim',
+  'kiem',
+  'goi',
+  'y',
+]);
+
+const extractQueryFallbackKeywords = (queryText: string) => {
+  return uniqueTerms(
+    String(queryText ?? '')
+      .split(/\s+/)
+      .map((item) => sanitizeForIlikeValue(item))
+      .filter((item) => item.length > 1)
+      .filter((item) => !QUERY_STOPWORDS.has(normalizeIntentText(item)))
+  );
+};
+
+const resolveCategoryIdsByTerms = async (terms: string[]) => {
+  const lookupTerms = uniqueTerms(
+    (terms ?? [])
+      .map((term) => sanitizeForIlikeValue(term))
+      .filter(Boolean)
+  );
+
+  if (lookupTerms.length === 0) return [] as (string | number)[];
+
+  const categoryOrClause = lookupTerms.map((term) => `name.ilike.%${term}%`).join(',');
+
+  const { data, error } = await supabase
+    .from('categories')
+    .select('id')
+    .or(categoryOrClause);
+
+  if (error) {
+    console.warn('resolveCategoryIdsByTerms failed:', error.message);
+    return [] as (string | number)[];
+  }
+
+  const ids: (string | number)[] = [];
+  const seen = new Set<string>();
+
+  for (const row of data ?? []) {
+    const id = (row as any)?.id;
+    if (typeof id !== 'string' && typeof id !== 'number') continue;
+
+    const key = String(id);
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    ids.push(id);
+  }
+
+  return ids;
+};
+
+const resolveCategoryIdsFromHints = async (hints: TravelCategoryHint[]) => {
+  const normalizedHints = uniqueTerms((hints ?? []).map((item) => item.trim()).filter(Boolean)) as TravelCategoryHint[];
+  if (normalizedHints.length === 0) return [];
+
+  const hintTerms = uniqueTerms(
+    normalizedHints
+      .flatMap((hint) => CATEGORY_HINT_DB_TERMS[hint] ?? [hint])
+      .filter(Boolean)
+  );
+
+  return resolveCategoryIdsByTerms(hintTerms);
+};
+
+const resolveCategoryIdsFromIntentType = async (intentType: TravelIntentType) => {
+  const terms = INTENT_TYPE_CATEGORY_TERMS[intentType] ?? [];
+  return resolveCategoryIdsByTerms(terms);
+};
+
+const formatCategoryIdForInOperator = (value: string | number) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `${value}`;
+  }
+
+  const sanitized = String(value ?? '')
+    .replace(/"/g, '')
+    .replace(/[(),]/g, ' ')
+    .trim();
+
+  return `"${sanitized}"`;
+};
+
+const buildAiGuidedOrClause = (input: {
+  aiSuggestedPlaces: string[];
+  categoryIds: (string | number)[];
+  rawQuery: string;
+}) => {
+  const aiPlaceTerms = uniqueTerms(
+    (input.aiSuggestedPlaces ?? [])
+      .map((item) => sanitizeForIlikeValue(item))
+      .filter((item) => item.length > 1)
+  );
+
+  const fallbackQueryTerms = extractQueryFallbackKeywords(input.rawQuery);
+
+  const clauses: string[] = [];
+
+  const tier1Terms = aiPlaceTerms.length > 0 ? aiPlaceTerms : fallbackQueryTerms;
+  for (const term of tier1Terms) {
+    clauses.push(`name.ilike.%${term}%`);
+  }
+
+  if ((input.categoryIds ?? []).length > 0) {
+    const formattedIds = input.categoryIds.map(formatCategoryIdForInOperator);
+    clauses.push(`category_id.in.(${formattedIds.join(',')})`);
+  }
+
+  return uniqueTerms(clauses).join(',');
+};
+
+const getDestinationCategoryName = (row: DestinationDiscoveryRow): string => {
+  const relation = row.categories as any;
+  if (Array.isArray(relation)) {
+    return String(relation[0]?.name ?? '').trim();
+  }
+
+  return String(relation?.name ?? '').trim();
+};
+
+const buildSemanticQueryText = (rawQuery: string) => {
+  const intents = detectIntents(rawQuery);
+  if (intents.length === 0) return rawQuery;
+
+  const semanticHints = uniqueTerms(intents.flatMap((intent) => intent.semanticHints));
+  return `${rawQuery}\nIntent hints: ${semanticHints.join(', ')}`;
+};
+
+const buildKeywordOrClause = (rawQuery: string) => {
+  const trimmed = rawQuery.trim();
+  const intents = detectIntents(trimmed);
+
+  const clauses = [
+    `name.ilike.%${trimmed}%`,
+    `location.ilike.%${trimmed}%`,
+    `description.ilike.%${trimmed}%`,
+  ];
+
+  const keywordTerms = uniqueTerms(intents.flatMap((intent) => intent.keywordTerms));
+  for (const term of keywordTerms) {
+    clauses.push(`name.ilike.%${term}%`);
+    clauses.push(`location.ilike.%${term}%`);
+    clauses.push(`description.ilike.%${term}%`);
+  }
+
+  return clauses.join(',');
+};
+
+const rerankByIntent = (rows: DestinationDiscoveryRow[], rawQuery: string): DestinationDiscoveryRow[] => {
+  const activeIntents = detectIntents(rawQuery);
+  if (activeIntents.length === 0) return rows;
+
+  const scoreRow = (row: DestinationDiscoveryRow) => {
+    const similarity = typeof row.similarity === 'number' && Number.isFinite(row.similarity)
+      ? row.similarity
+      : 0;
+    const categoryName = normalizeIntentText(getDestinationCategoryName(row));
+    const rowText = normalizeIntentText(
+      `${row.name ?? ''} ${row.location ?? ''} ${row.description ?? ''} ${categoryName}`
+    );
+
+    let boost = 0;
+    for (const intent of activeIntents) {
+      if (hasAnyIntentTerm(rowText, intent.entityTerms)) {
+        boost += intent.boost;
+      }
+
+      if (hasAnyIntentTerm(categoryName, intent.categoryTerms)) {
+        boost += intent.categoryBoost;
+      }
+
+      if (
+        intent.penaltyTerms &&
+        intent.penaltyTerms.length > 0 &&
+        hasAnyIntentTerm(rowText, intent.penaltyTerms) &&
+        !hasAnyIntentTerm(rowText, intent.entityTerms)
+      ) {
+        boost -= intent.penalty ?? 0;
+      }
+    }
+
+    return similarity + boost;
+  };
+
+  return [...rows].sort((a, b) => scoreRow(b) - scoreRow(a));
+};
 
 export const calculateAverageRating = (
   reviews: { rating: number | null | undefined }[] | null | undefined,
@@ -244,10 +618,12 @@ export const destinationService = {
 
   async searchDestinations(query: string) {
     const trimmed = query.trim();
+    const orClause = buildKeywordOrClause(trimmed);
+
     const { data, error } = await supabase
       .from('destinations')
       .select('*, categories(name)')
-      .or(`name.ilike.%${trimmed}%,location.ilike.%${trimmed}%`)
+      .or(orClause)
       .order('name', { ascending: true });
 
     if (error) throw error;
@@ -258,65 +634,194 @@ export const destinationService = {
     const trimmed = queryText.trim();
     if (!trimmed) return [];
 
-    try {
-      const queryEmbedding = await generateEmbedding(trimmed);
+    const destinationSelect =
+      'id, name, location, description, price, rating, image_url, category_id, latitude, longitude, created_at, categories(name)';
 
-      const { data: matchRowsRaw, error: matchError } = await supabase.rpc('match_destinations', {
-        query_embedding: queryEmbedding,
-        match_threshold: 0.15,
-        match_count: 40,
+    try {
+      const intent = await extractTravelSearchIntent(trimmed);
+
+      if (!intent.is_travel_related) {
+        return [];
+      }
+
+      const hintCategoryIds = await resolveCategoryIdsFromHints(intent.category_hints);
+      const intentCategoryIds = await resolveCategoryIdsFromIntentType(intent.intent_type);
+
+      const mergedCategoryIds = uniqueTerms([
+        ...intentCategoryIds.map((id) => String(id)),
+        ...hintCategoryIds.map((id) => String(id)),
+      ]);
+
+      const categoryIds =
+        intent.intent_type === 'spiritual' && intentCategoryIds.length > 0
+          ? intentCategoryIds
+          : mergedCategoryIds;
+
+      const orClause = buildAiGuidedOrClause({
+        aiSuggestedPlaces: intent.ai_suggested_places,
+        categoryIds,
+        rawQuery: trimmed,
       });
 
-      if (matchError) throw matchError;
-
-      const matchRows = (matchRowsRaw ?? []) as DestinationVectorMatchRow[];
-      const orderedIds = matchRows
-        .map((row) => String(row.id ?? '').trim())
-        .filter(Boolean);
-
-      if (orderedIds.length === 0) return [];
-
-      const similarityById = new Map<string, number | null>();
-      for (const row of matchRows) {
-        const id = String(row.id ?? '').trim();
-        if (!id) continue;
-
-        const similarity = typeof row.similarity === 'number' && Number.isFinite(row.similarity)
-          ? row.similarity
-          : null;
-        similarityById.set(id, similarity);
+      if (!orClause) {
+        return [];
       }
 
-      const { data: destinationRows, error: destinationError } = await supabase
+      let guidedQuery = supabase
         .from('destinations')
-        .select('id, name, location, price, rating, image_url, category_id, latitude, longitude, lat, lng, created_at, categories(name)')
-        .in('id', orderedIds);
+        .select(destinationSelect)
+        .or(orClause);
 
-      if (destinationError) throw destinationError;
-
-      const rowById = new Map<string, DestinationDiscoveryRow>();
-      for (const row of destinationRows ?? []) {
-        const id = String((row as any)?.id ?? '').trim();
-        if (!id) continue;
-        rowById.set(id, row as DestinationDiscoveryRow);
+      if (intent.is_free === true) {
+        guidedQuery = guidedQuery.eq('price', 0);
+      } else if (intent.is_free === false) {
+        guidedQuery = guidedQuery.gt('price', 0);
       }
 
-      const orderedRows: DestinationDiscoveryRow[] = [];
-      for (const id of orderedIds) {
-        const row = rowById.get(id);
-        if (!row) continue;
+      const { data: strictRowsRaw, error: strictError } = await guidedQuery
+        .order('rating', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(80);
 
-        orderedRows.push({
-          ...row,
-          similarity: similarityById.get(id) ?? null,
+      if (strictError) throw strictError;
+
+      const strictRows = (strictRowsRaw ?? []) as DestinationDiscoveryRow[];
+      if (strictRows.length > 0) {
+        return rerankByIntent(strictRows, trimmed);
+      }
+
+      const fallbackKeywordClause = buildKeywordOrClause(trimmed);
+      if (!fallbackKeywordClause) {
+        return [];
+      }
+
+      let fallbackQuery = supabase
+        .from('destinations')
+        .select(destinationSelect)
+        .or(fallbackKeywordClause);
+
+      if (intent.is_free === true) {
+        fallbackQuery = fallbackQuery.eq('price', 0);
+      } else if (intent.is_free === false) {
+        fallbackQuery = fallbackQuery.gt('price', 0);
+      }
+
+      const { data: fallbackRowsRaw, error: fallbackError } = await fallbackQuery
+        .order('rating', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(60);
+
+      if (fallbackError) throw fallbackError;
+
+      return rerankByIntent((fallbackRowsRaw ?? []) as DestinationDiscoveryRow[], trimmed);
+    } catch (intentErr: any) {
+      console.warn('searchDestinationsByAI strict intent path failed, fallback to embeddings:', intentErr?.message ?? intentErr);
+
+      try {
+        const activeIntents = detectIntents(trimmed);
+        const queryEmbedding = await generateEmbedding(buildSemanticQueryText(trimmed));
+
+        const { data: matchRowsRaw, error: matchError } = await supabase.rpc('match_destinations', {
+          query_embedding: queryEmbedding,
+          match_threshold: 0.15,
+          match_count: 40,
         });
-      }
 
-      return orderedRows;
-    } catch (err: any) {
-      console.warn('searchDestinationsByAI fallback to keyword search:', err?.message ?? err);
-      const fallback = await this.searchDestinations(trimmed);
-      return (fallback ?? []) as DestinationDiscoveryRow[];
+        if (matchError) throw matchError;
+
+        const matchRows = (matchRowsRaw ?? []) as DestinationVectorMatchRow[];
+        const orderedIds = matchRows
+          .map((row) => String(row.id ?? '').trim())
+          .filter(Boolean);
+
+        if (orderedIds.length === 0) {
+          const fallback = await this.searchDestinations(trimmed);
+          return (fallback ?? []) as DestinationDiscoveryRow[];
+        }
+
+        const similarityById = new Map<string, number | null>();
+        for (const row of matchRows) {
+          const id = String(row.id ?? '').trim();
+          if (!id) continue;
+
+          const similarity = typeof row.similarity === 'number' && Number.isFinite(row.similarity)
+            ? row.similarity
+            : null;
+          similarityById.set(id, similarity);
+        }
+
+        const { data: destinationRows, error: destinationError } = await supabase
+          .from('destinations')
+          .select(destinationSelect)
+          .in('id', orderedIds);
+
+        if (destinationError) throw destinationError;
+
+        const rowById = new Map<string, DestinationDiscoveryRow>();
+        for (const row of destinationRows ?? []) {
+          const id = String((row as any)?.id ?? '').trim();
+          if (!id) continue;
+          rowById.set(id, row as DestinationDiscoveryRow);
+        }
+
+        const orderedRows: DestinationDiscoveryRow[] = [];
+        for (const id of orderedIds) {
+          const row = rowById.get(id);
+          if (!row) continue;
+
+          orderedRows.push({
+            ...row,
+            similarity: similarityById.get(id) ?? null,
+          });
+        }
+
+        let keywordRows: DestinationDiscoveryRow[] = [];
+        if (activeIntents.length > 0) {
+          const keywordFallback = await this.searchDestinations(trimmed);
+          keywordRows = (keywordFallback ?? []) as DestinationDiscoveryRow[];
+        }
+
+        if (orderedRows.length === 0) {
+          if (keywordRows.length > 0) {
+            return rerankByIntent(keywordRows, trimmed);
+          }
+
+          const fallback = await this.searchDestinations(trimmed);
+          return (fallback ?? []) as DestinationDiscoveryRow[];
+        }
+
+        let blendedRows = orderedRows;
+        if (keywordRows.length > 0) {
+          const mergedById = new Map<string, DestinationDiscoveryRow>();
+
+          for (const row of orderedRows) {
+            const id = String(row.id ?? '').trim();
+            if (!id) continue;
+            mergedById.set(id, row);
+          }
+
+          for (const row of keywordRows) {
+            const id = String(row.id ?? '').trim();
+            if (!id || mergedById.has(id)) continue;
+
+            mergedById.set(id, {
+              ...row,
+              similarity:
+                typeof row.similarity === 'number' && Number.isFinite(row.similarity)
+                  ? row.similarity
+                  : 0.12,
+            });
+          }
+
+          blendedRows = Array.from(mergedById.values());
+        }
+
+        return rerankByIntent(blendedRows, trimmed);
+      } catch (err: any) {
+        console.warn('searchDestinationsByAI fallback to keyword search:', err?.message ?? err);
+        const fallback = await this.searchDestinations(trimmed);
+        return (fallback ?? []) as DestinationDiscoveryRow[];
+      }
     }
   },
 
@@ -380,7 +885,7 @@ export const destinationService = {
 
     let query = supabase
       .from('destinations')
-      .select('id, name, location, price, rating, image_url, category_id, latitude, longitude, lat, lng, created_at, categories(name)');
+      .select('id, name, location, price, rating, image_url, category_id, latitude, longitude, created_at, categories(name)');
 
     if (search) {
       query = query.or(`name.ilike.%${search}%,location.ilike.%${search}%`);
@@ -516,10 +1021,24 @@ export const destinationService = {
 
     // Fetch only snake_case columns from `reviews`, then fetch related `profiles` separately.
     // This avoids PostgREST 400 errors when the FK relationship name isn't exposed/recognized.
-    const runQuery = (withImageUrlsColumn: boolean) => {
-      const selectColumns = withImageUrlsColumn
-        ? 'id, user_id, destination_id, rating, comment, helpful_count, reply_text, replied_at, replied_by, review_image_urls, created_at'
-        : 'id, user_id, destination_id, rating, comment, helpful_count, reply_text, replied_at, replied_by, created_at';
+    const runQuery = (withImageUrlsColumn: boolean, withAdminReplyColumn: boolean) => {
+      const columns = [
+        'id',
+        'user_id',
+        'destination_id',
+        'rating',
+        'comment',
+        'helpful_count',
+        'reply_text',
+        'replied_at',
+        'replied_by',
+      ];
+
+      if (withAdminReplyColumn) columns.push('admin_reply');
+      if (withImageUrlsColumn) columns.push('review_image_urls');
+      columns.push('created_at');
+
+      const selectColumns = columns.join(', ');
 
       return supabase
         .from('reviews')
@@ -529,12 +1048,19 @@ export const destinationService = {
         .range(from, to);
     };
 
-    let reviewsRes = await runQuery(true);
+    let includeImageUrls = true;
+    let includeAdminReply = true;
+    let reviewsRes = await runQuery(includeImageUrls, includeAdminReply);
+
     if (reviewsRes.error) {
       const errorMessage = String((reviewsRes.error as any)?.message ?? '').toLowerCase();
       const shouldRetryWithoutImageUrls = errorMessage.includes('review_image_urls') && errorMessage.includes('does not exist');
-      if (shouldRetryWithoutImageUrls) {
-        reviewsRes = await runQuery(false);
+      const shouldRetryWithoutAdminReply = errorMessage.includes('admin_reply') && errorMessage.includes('does not exist');
+
+      if (shouldRetryWithoutImageUrls || shouldRetryWithoutAdminReply) {
+        includeImageUrls = !shouldRetryWithoutImageUrls;
+        includeAdminReply = !shouldRetryWithoutAdminReply;
+        reviewsRes = await runQuery(includeImageUrls, includeAdminReply);
       }
     }
 
@@ -619,10 +1145,24 @@ export const destinationService = {
   },
 
   async getReviews(destinationId: string) {
-    const runQuery = (withImageUrlsColumn: boolean) => {
-      const selectColumns = withImageUrlsColumn
-        ? 'id, user_id, destination_id, rating, comment, helpful_count, reply_text, replied_at, replied_by, review_image_urls, created_at'
-        : 'id, user_id, destination_id, rating, comment, helpful_count, reply_text, replied_at, replied_by, created_at';
+    const runQuery = (withImageUrlsColumn: boolean, withAdminReplyColumn: boolean) => {
+      const columns = [
+        'id',
+        'user_id',
+        'destination_id',
+        'rating',
+        'comment',
+        'helpful_count',
+        'reply_text',
+        'replied_at',
+        'replied_by',
+      ];
+
+      if (withAdminReplyColumn) columns.push('admin_reply');
+      if (withImageUrlsColumn) columns.push('review_image_urls');
+      columns.push('created_at');
+
+      const selectColumns = columns.join(', ');
 
       return supabase
         .from('reviews')
@@ -631,12 +1171,19 @@ export const destinationService = {
         .order('created_at', { ascending: false });
     };
 
-    let reviewsRes = await runQuery(true);
+    let includeImageUrls = true;
+    let includeAdminReply = true;
+    let reviewsRes = await runQuery(includeImageUrls, includeAdminReply);
+
     if (reviewsRes.error) {
       const errorMessage = String((reviewsRes.error as any)?.message ?? '').toLowerCase();
       const shouldRetryWithoutImageUrls = errorMessage.includes('review_image_urls') && errorMessage.includes('does not exist');
-      if (shouldRetryWithoutImageUrls) {
-        reviewsRes = await runQuery(false);
+      const shouldRetryWithoutAdminReply = errorMessage.includes('admin_reply') && errorMessage.includes('does not exist');
+
+      if (shouldRetryWithoutImageUrls || shouldRetryWithoutAdminReply) {
+        includeImageUrls = !shouldRetryWithoutImageUrls;
+        includeAdminReply = !shouldRetryWithoutAdminReply;
+        reviewsRes = await runQuery(includeImageUrls, includeAdminReply);
       }
     }
 

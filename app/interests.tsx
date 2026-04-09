@@ -1,11 +1,20 @@
 import { useI18n } from '@/src/i18n/useI18n';
-import { router } from 'expo-router'; //
-import React, { useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router, useLocalSearchParams } from 'expo-router'; //
+import React, { useMemo, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../src/services/supabase';
 
+const ONBOARDING_COMPLETED_STORAGE_KEY = 'exploreease.onboarding.completed';
+
+const toInterestArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
+};
+
 export default function InterestsScreen() {
   const { t } = useI18n();
+  const searchParams = useLocalSearchParams<{ mode?: string | string[] }>();
 
   const INTERESTS_DATA = [
     { id: 'Food', label: t('profile.interests.food') },
@@ -18,36 +27,123 @@ export default function InterestsScreen() {
 
   // Sửa lỗi TS: Khai báo kiểu string[] cho mảng selected
   const [selected, setSelected] = useState<string[]>([]);
+  const modeParam = useMemo(() => {
+    const raw = searchParams.mode;
+    return Array.isArray(raw) ? raw[0] : raw;
+  }, [searchParams.mode]);
+  const [isEditMode, setIsEditMode] = useState(modeParam === 'edit');
+
+  const submitLabel = useMemo(
+    () => (isEditMode ? `${t('profile.edit')} ${t('profile.interests.title')}` : t('auth.interests.startExploring')),
+    [isEditMode, t]
+  );
+
+  React.useEffect(() => {
+    let alive = true;
+
+    const bootstrap = async () => {
+      try {
+        if (modeParam === 'edit') {
+          setIsEditMode(true);
+        } else {
+          const onboardingCompleted = await AsyncStorage.getItem(ONBOARDING_COMPLETED_STORAGE_KEY);
+          if (!alive) return;
+
+          setIsEditMode(onboardingCompleted === 'true');
+        }
+
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (!alive || userError || !user) return;
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('interests')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (!alive) return;
+
+        const profileInterests = toInterestArray((profile as { interests?: unknown } | null)?.interests);
+        if (profileInterests.length > 0) {
+          setSelected(profileInterests);
+        }
+      } catch {
+        if (!alive) return;
+      }
+    };
+
+    void bootstrap();
+
+    return () => {
+      alive = false;
+    };
+  }, [modeParam]);
 
   // Sửa lỗi TS: Khai báo kiểu string cho id
   const toggleInterest = (id: string) => {
-    if (selected.includes(id)) setSelected(selected.filter(i => i !== id));
-    else setSelected([...selected, id]);
+    setSelected((prev) => {
+      if (prev.includes(id)) return prev.filter((item) => item !== id);
+      return [...prev, id];
+    });
   };
 
   const handleStartExploring = async () => {
-    if (selected.length < 3) {
+    if (!isEditMode && selected.length < 3) {
       Alert.alert(t('common.notification'), t('auth.interests.minSelectionMessage'));
       return;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    // Sửa lỗi TS: Kiểm tra user có tồn tại không trước khi lấy id
-    if (!user) {
-      Alert.alert(t('auth.profileSetup.errorTitle'), t('auth.interests.errorMissingAuth'));
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError) throw userError;
+
+      if (!user) {
+        Alert.alert(t('auth.profileSetup.errorTitle'), t('auth.interests.errorMissingAuth'));
         return;
-    }
+      }
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({ interests: selected })
-      .eq('id', user.id);
+      const { error } = await supabase
+        .from('profiles')
+        .update({ interests: selected })
+        .eq('id', user.id);
 
-    if (error) Alert.alert(t('auth.profileSetup.errorTitle'), t('auth.interests.errorSaveInterests'));
-    else {
-        Alert.alert(t('auth.interests.successTitle'), t('auth.interests.successMessage'));
-        router.replace('/(tabs)/explore' as any); //
+      if (error) throw error;
+
+      if (isEditMode) {
+        if (router.canGoBack()) {
+          router.back();
+        } else {
+          router.replace('/(tabs)/profile');
+        }
+        return;
+      }
+
+      try {
+        await AsyncStorage.setItem(ONBOARDING_COMPLETED_STORAGE_KEY, 'true');
+      } catch (storageErr: any) {
+        const storageMessage = typeof storageErr?.message === 'string' && storageErr.message.trim()
+          ? storageErr.message
+          : t('auth.interests.errorSaveInterests');
+
+        Alert.alert(t('auth.profileSetup.errorTitle'), storageMessage);
+      }
+
+      router.replace('/(tabs)');
+    } catch (err: any) {
+      const fallbackMessage = t('auth.interests.errorSaveInterests');
+      const message = typeof err?.message === 'string' && err.message.trim()
+        ? err.message
+        : fallbackMessage;
+
+      Alert.alert(t('auth.profileSetup.errorTitle'), message);
     }
   };
 
@@ -75,7 +171,7 @@ export default function InterestsScreen() {
       />
 
       <TouchableOpacity style={styles.startBtn} onPress={handleStartExploring}>
-        <Text style={styles.startBtnText}>{t('auth.interests.startExploring')}</Text>
+        <Text style={styles.startBtnText}>{submitLabel}</Text>
       </TouchableOpacity>
     </View>
   );

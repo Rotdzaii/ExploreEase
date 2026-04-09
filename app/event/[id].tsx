@@ -7,6 +7,7 @@ import { useNetwork } from '@/hooks/useNetwork';
 import { useCurrency } from '@/src/context/currency';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
+import { eventBookmarkService } from '@/src/services/eventBookmarkService';
 import { calculateAverageRating as calculateEventAverageRating, eventReviewService, type EventReviewRow } from '@/src/services/eventReviewService';
 import { eventService, getEventStatusByTime, type EventRow, type EventStatus } from '@/src/services/eventService';
 import { itineraryService } from '@/src/services/itineraryService';
@@ -31,6 +32,7 @@ import {
     Pressable,
     SafeAreaView,
     ScrollView,
+    Share,
     StyleSheet,
     Text,
     useWindowDimensions,
@@ -181,6 +183,8 @@ export default function EventDetailScreen() {
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [addingToPlan, setAddingToPlan] = useState(false);
   const [savingToTrip, setSavingToTrip] = useState(false);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [bookmarkPending, setBookmarkPending] = useState(false);
 
   const [reviews, setReviews] = useState<EventReviewRow[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
@@ -561,6 +565,21 @@ export default function EventDetailScreen() {
     }
   }, []);
 
+  const loadBookmarkState = useCallback(async () => {
+    if (!eventId) {
+      setIsBookmarked(false);
+      return;
+    }
+
+    try {
+      const bookmarked = await eventBookmarkService.getIsBookmarked(eventId, currentUserId);
+      setIsBookmarked(bookmarked);
+    } catch (error) {
+      console.warn('loadBookmarkState failed:', error);
+      setIsBookmarked(false);
+    }
+  }, [currentUserId, eventId]);
+
   const refreshReviews = useCallback(async () => {
     if (!eventId) return;
 
@@ -708,6 +727,10 @@ export default function EventDetailScreen() {
       clearInterval(timerId);
     };
   }, [event]);
+
+  useEffect(() => {
+    void loadBookmarkState();
+  }, [loadBookmarkState]);
 
   const fetchContextualRecommendations = useCallback(async () => {
     if (!eventId) {
@@ -1258,6 +1281,58 @@ export default function EventDetailScreen() {
     [event, t]
   );
 
+  const onShareEvent = useCallback(async () => {
+    if (!event) return;
+
+    const message = t('event.detail.shareMessage', {
+      title: event.title,
+      location: event.location,
+      start: formatEventDateTimeText(event.start_time),
+      description: event.description?.trim() ? event.description.trim() : t('event.detail.noDescription'),
+    });
+
+    try {
+      await Share.share({
+        title: event.title,
+        message,
+      });
+    } catch (error) {
+      console.warn('onShareEvent failed:', error);
+      addNotification({
+        message: t('event.detail.shareFailed'),
+        type: 'error',
+        durationMs: 3200,
+      });
+    }
+  }, [addNotification, event, formatEventDateTimeText, t]);
+
+  const onToggleEventBookmark = useCallback(async () => {
+    if (!eventId || bookmarkPending) return;
+
+    const next = !isBookmarked;
+    setBookmarkPending(true);
+    setIsBookmarked(next);
+
+    try {
+      await eventBookmarkService.setBookmarked(eventId, next, currentUserId);
+      addNotification({
+        message: next ? t('event.detail.bookmarkSaved') : t('event.detail.bookmarkRemoved'),
+        type: 'success',
+        durationMs: 2600,
+      });
+    } catch (error) {
+      console.warn('onToggleEventBookmark failed:', error);
+      setIsBookmarked(!next);
+      addNotification({
+        message: t('event.detail.bookmarkToggleFailed'),
+        type: 'error',
+        durationMs: 3200,
+      });
+    } finally {
+      setBookmarkPending(false);
+    }
+  }, [addNotification, bookmarkPending, currentUserId, eventId, isBookmarked, t]);
+
   if (loading) {
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
@@ -1355,6 +1430,67 @@ export default function EventDetailScreen() {
           <Text style={[styles.sectionText, { color: colors.text }]}>
             {event.description?.trim() ? event.description : t('event.detail.noDescription')}
           </Text>
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('event.detail.quickActionsTitle')}</Text>
+
+          <View style={styles.utilityActionsRow}>
+            <Pressable
+              onPress={() => void onShareEvent()}
+              style={({ pressed }) => [
+                styles.utilityActionBtn,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)',
+                },
+                pressed ? { opacity: 0.84 } : null,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={t('event.detail.shareAction')}
+            >
+              <MaterialCommunityIcons name="share-variant" size={18} color={ExploreEaseColors.primary} />
+              <Text style={[styles.utilityActionText, { color: colors.text }]}>{t('event.detail.shareAction')}</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => void onToggleEventBookmark()}
+              disabled={bookmarkPending}
+              style={({ pressed }) => [
+                styles.utilityActionBtn,
+                {
+                  borderColor: isBookmarked ? 'rgba(34,211,238,0.42)' : colors.border,
+                  backgroundColor: isBookmarked
+                    ? 'rgba(34,211,238,0.14)'
+                    : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)'),
+                  opacity: bookmarkPending ? 0.72 : 1,
+                },
+                pressed ? { opacity: 0.84 } : null,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={
+                isBookmarked ? t('event.detail.bookmarkedAction') : t('event.detail.bookmarkAction')
+              }
+            >
+              {bookmarkPending ? (
+                <ActivityIndicator color={ExploreEaseColors.primary} />
+              ) : (
+                <MaterialCommunityIcons
+                  name={isBookmarked ? 'bookmark' : 'bookmark-outline'}
+                  size={18}
+                  color={ExploreEaseColors.primary}
+                />
+              )}
+
+              <Text style={[styles.utilityActionText, { color: colors.text }]}>
+                {bookmarkPending
+                  ? t('event.detail.bookmarkUpdating')
+                  : isBookmarked
+                    ? t('event.detail.bookmarkedAction')
+                    : t('event.detail.bookmarkAction')}
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -2373,6 +2509,27 @@ const styles = StyleSheet.create({
     color: '#001018',
     fontSize: 13,
     fontWeight: '900',
+  },
+  utilityActionsRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    columnGap: 10,
+    rowGap: 10,
+  },
+  utilityActionBtn: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  utilityActionText: {
+    fontSize: 13,
+    fontWeight: '800',
   },
   reviewsHeaderRow: {
     flexDirection: 'row',

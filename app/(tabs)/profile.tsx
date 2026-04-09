@@ -9,9 +9,10 @@ import { supabase } from '@/src/services/supabase';
 import { useLanguageStore } from '@/src/store/useLanguageStore';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useMemo } from 'react';
-import { Image, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 export default function ProfileScreen() {
   const { isDark, toggleColorScheme } = useTheme();
@@ -23,11 +24,13 @@ export default function ProfileScreen() {
   const [nationality, setNationality] = React.useState<string>('');
   const [nationalityCode, setNationalityCode] = React.useState<string>('VN');
   const [interests, setInterests] = React.useState<string[]>([]);
+  const [avatarUrl, setAvatarUrl] = React.useState<string>('');
   const [tripCount, setTripCount] = React.useState<number>(0);
   const [reviewCount, setReviewCount] = React.useState<number>(0);
   const [loadingStats, setLoadingStats] = React.useState<boolean>(true);
   const [isAdmin, setIsAdmin] = React.useState(false);
   const [languageModalVisible, setLanguageModalVisible] = React.useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = React.useState(false);
 
   const toInterestLabel = React.useCallback((value: string) => {
     const normalized = value.trim().toLowerCase();
@@ -63,6 +66,9 @@ export default function ProfileScreen() {
 
   const resolvedProfileName = profileName.trim() || t('profile.defaultName');
   const resolvedNationality = nationality.trim() || t('profile.defaultNationality');
+  const resolvedAvatarUri = avatarUrl.trim()
+    ? avatarUrl.trim()
+    : `https://api.dicebear.com/7.x/avataaars/png?seed=${encodeURIComponent(resolvedProfileName)}`;
 
   React.useEffect(() => {
     let alive = true;
@@ -101,11 +107,13 @@ export default function ProfileScreen() {
         setProfileName(normalizedName);
         setNationality(normalizedNationality);
         setNationalityCode(normalizedNationalityCode);
+        setAvatarUrl(typeof profile.avatar_url === 'string' ? profile.avatar_url : '');
         setInterests(Array.isArray(profile.interests) ? profile.interests : []);
       } catch {
         setIsAdmin(false);
         setTripCount(0);
         setReviewCount(0);
+        setAvatarUrl('');
         setInterests([]);
       } finally {
         setLoadingStats(false);
@@ -140,6 +148,10 @@ export default function ProfileScreen() {
     router.push('/profile-setup');
   }, []);
 
+  const handleEditInterests = React.useCallback(() => {
+    router.push('/interests?mode=edit');
+  }, []);
+
   const handleLogout = React.useCallback(async () => {
     try {
       await supabase.auth.signOut();
@@ -147,6 +159,105 @@ export default function ProfileScreen() {
       router.replace('/login');
     }
   }, []);
+
+  const handlePickAvatar = React.useCallback(async () => {
+    if (uploadingAvatar) return;
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      addNotification({
+        message: t('profile.avatar.permissionDenied'),
+        type: 'warning',
+        durationMs: 3200,
+      });
+      return;
+    }
+
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+      allowsMultipleSelection: false,
+    });
+
+    if (picked.canceled || !picked.assets?.length) return;
+
+    const asset = picked.assets[0];
+    if (!asset?.uri) {
+      addNotification({
+        message: t('profile.avatar.pickFailed'),
+        type: 'error',
+        durationMs: 3200,
+      });
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error) throw error;
+
+      const userId = data.user?.id;
+      if (!userId) throw new Error(t('profile.avatar.missingAuth'));
+
+      const extensionFromFileName =
+        typeof asset.fileName === 'string' && asset.fileName.includes('.')
+          ? asset.fileName.split('.').pop()?.trim().toLowerCase()
+          : null;
+      const extensionFromMime =
+        asset.mimeType === 'image/png'
+          ? 'png'
+          : asset.mimeType === 'image/webp'
+            ? 'webp'
+            : 'jpg';
+      const extension = extensionFromFileName || extensionFromMime || 'jpg';
+
+      const avatarPath = `${userId}/${Date.now()}-avatar.${extension}`;
+      const uploadResponse = await fetch(asset.uri);
+      const avatarBlob = await uploadResponse.blob();
+      const avatarBuffer = await avatarBlob.arrayBuffer();
+
+      const { error: uploadErr } = await supabase.storage
+        .from('avatars')
+        .upload(avatarPath, avatarBuffer, {
+          cacheControl: '3600',
+          contentType: asset.mimeType ?? 'image/jpeg',
+          upsert: true,
+        });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data: publicData } = supabase.storage.from('avatars').getPublicUrl(avatarPath);
+      const nextAvatarUrl = publicData.publicUrl;
+      if (!nextAvatarUrl) {
+        throw new Error(t('profile.avatar.uploadFailed'));
+      }
+
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({ avatar_url: nextAvatarUrl })
+        .eq('id', userId);
+
+      if (profileErr) throw profileErr;
+
+      setAvatarUrl(nextAvatarUrl);
+      addNotification({
+        message: t('profile.avatar.updated'),
+        type: 'success',
+        durationMs: 2400,
+      });
+    } catch (err: any) {
+      const reason = String(err?.message ?? '').trim() || t('profile.avatar.uploadFailed');
+      addNotification({
+        message: t('profile.avatar.uploadFailedWithReason', { reason }),
+        type: 'error',
+        durationMs: 4200,
+      });
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }, [addNotification, t, uploadingAvatar]);
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
@@ -161,12 +272,32 @@ export default function ProfileScreen() {
           {/* Profile header */}
           <View style={[styles.profileCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
             <View style={styles.profileLeft}>
-              <View style={[styles.avatarWrap, { borderColor: colors.border }]}>
-                <Image
-                  source={{ uri: `https://api.dicebear.com/7.x/avataaars/png?seed=${encodeURIComponent(resolvedProfileName)}` }}
-                  style={styles.avatar}
-                />
-              </View>
+              <Pressable
+                onPress={() => void handlePickAvatar()}
+                disabled={uploadingAvatar}
+                style={({ pressed }) => [
+                  styles.avatarActionWrap,
+                  pressed ? { opacity: 0.84 } : null,
+                  uploadingAvatar ? { opacity: 0.7 } : null,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={t('profile.avatar.change')}
+              >
+                <View style={[styles.avatarWrap, { borderColor: colors.border }]}>
+                  <Image
+                    source={{ uri: resolvedAvatarUri }}
+                    style={styles.avatar}
+                  />
+                </View>
+
+                <View style={[styles.avatarActionBadge, { borderColor: colors.border, backgroundColor: colors.cardBg }]}> 
+                  {uploadingAvatar ? (
+                    <ActivityIndicator size="small" color={ExploreEaseColors.primary} />
+                  ) : (
+                    <Feather name="camera" size={14} color={ExploreEaseColors.primary} />
+                  )}
+                </View>
+              </Pressable>
 
               <View style={{ flex: 1 }}>
                 <Text style={[styles.profileName, { color: colors.title }]} numberOfLines={1}>
@@ -174,6 +305,9 @@ export default function ProfileScreen() {
                 </Text>
                 <Text style={[styles.profileMeta, { color: colors.subtitle }]} numberOfLines={1}>
                   {resolvedNationality}
+                </Text>
+                <Text style={{ marginTop: 6, color: colors.subtitle, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>
+                  {uploadingAvatar ? t('profile.avatar.uploading') : t('profile.avatar.change')}
                 </Text>
               </View>
             </View>
@@ -191,19 +325,37 @@ export default function ProfileScreen() {
             </Pressable>
           </View>
 
+          <Text style={[styles.blockTitle, { color: colors.title }]}>{t('profile.interests.title')}</Text>
           {displayInterests.length > 0 ? (
-            <>
-              <Text style={[styles.blockTitle, { color: colors.title }]}>{t('profile.interests.title')}</Text>
-              <View style={styles.chipsRow}>
-                {displayInterests.map((item) => (
-                  <View key={item} style={[styles.chip, { borderColor: colors.chipBorder, backgroundColor: colors.cardBg }]}>
-                    <Feather name={toInterestIcon(item)} size={16} color={colors.title} />
-                    <Text style={[styles.chipText, { color: colors.title }]}>{item}</Text>
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : null}
+            <View style={styles.chipsRow}>
+              {displayInterests.map((item) => (
+                <View key={item} style={[styles.chip, { borderColor: colors.chipBorder, backgroundColor: colors.cardBg }]}>
+                  <Feather name={toInterestIcon(item)} size={16} color={colors.title} />
+                  <Text style={[styles.chipText, { color: colors.title }]}>{item}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={[styles.emptyInterestsCard, { borderColor: colors.border, backgroundColor: colors.softCardBg }]}>
+              <Text style={[styles.emptyInterestsText, { color: colors.subtitle }]}>{t('auth.interests.selectSubtitle')}</Text>
+            </View>
+          )}
+
+          <Pressable
+            onPress={handleEditInterests}
+            style={({ pressed }) => [
+              styles.editInterestsButton,
+              {
+                backgroundColor: ExploreEaseColors.primary,
+                opacity: pressed ? 0.86 : 1,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('profile.edit')} ${t('profile.interests.title')}`}
+          >
+            <Feather name="sliders" size={16} color="#001018" />
+            <Text style={styles.editInterestsButtonText}>{`${t('profile.edit')} ${t('profile.interests.title')}`}</Text>
+          </Pressable>
 
           {/* Stats */}
           <View style={styles.statsRow}>
@@ -460,6 +612,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   profileLeft: { flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1, paddingRight: 12 },
+  avatarActionWrap: {
+    position: 'relative',
+  },
   avatarWrap: {
     width: 74,
     height: 74,
@@ -471,6 +626,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   avatar: { width: '100%', height: '100%', resizeMode: 'cover' },
+  avatarActionBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   profileName: { fontSize: 36, fontWeight: '900', letterSpacing: 0.2 },
   profileMeta: { marginTop: 2, fontSize: 14, fontWeight: '700' },
   editBtn: {
@@ -494,6 +660,33 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   chipText: { fontSize: 13, fontWeight: '800' },
+  emptyInterestsCard: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  emptyInterestsText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  editInterestsButton: {
+    marginTop: 12,
+    minHeight: 44,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  editInterestsButtonText: {
+    color: '#001018',
+    fontWeight: '900',
+    fontSize: 13,
+  },
 
   statsRow: { flexDirection: 'row', gap: 14, marginTop: 16 },
   statCard: {

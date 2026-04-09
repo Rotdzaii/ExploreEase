@@ -7,6 +7,7 @@ export type ReviewRow = {
   rating: number;
   comment?: string | null;
   helpful_count?: number | null;
+  admin_reply?: string | null;
   reply_text?: string | null;
   replied_at?: string | null;
   replied_by?: string | null;
@@ -40,6 +41,7 @@ export type ReplyToReviewInput = {
 export type ReviewReplyResult = {
   reviewId: string;
   replyText: string;
+  adminReply: string | null;
   repliedAt: string | null;
   repliedBy: string | null;
 };
@@ -267,15 +269,31 @@ export const reviewService = {
 
     const userId = await ensureAuthenticatedUserId();
 
+    const { data: profile, error: profileErr } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (profileErr) throw profileErr;
+    const role = String((profile as any)?.role ?? '').trim().toLowerCase();
+    const isAdmin = role === 'admin';
+
+    const payload: Record<string, any> = {
+      reply_text: replyText,
+      replied_at: new Date().toISOString(),
+      replied_by: userId,
+    };
+
+    if (isAdmin) {
+      payload.admin_reply = replyText;
+    }
+
     const { data, error } = await supabase
       .from('reviews')
-      .update({
-        reply_text: replyText,
-        replied_at: new Date().toISOString(),
-        replied_by: userId,
-      })
+      .update(payload)
       .eq('id', reviewId)
-      .select('id, reply_text, replied_at, replied_by')
+      .select('id, reply_text, admin_reply, replied_at, replied_by')
       .single();
 
     if (error) throw error;
@@ -283,6 +301,7 @@ export const reviewService = {
     return {
       reviewId: String((data as any).id),
       replyText: String((data as any).reply_text ?? ''),
+      adminReply: typeof (data as any).admin_reply === 'string' ? (data as any).admin_reply : null,
       repliedAt: (data as any).replied_at ?? null,
       repliedBy: (data as any).replied_by ?? null,
     };

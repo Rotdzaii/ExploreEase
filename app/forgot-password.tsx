@@ -609,6 +609,30 @@ export default function ForgotPasswordScreen() {
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={[styles.progressHeader, { borderColor: colors.border, backgroundColor: isDark ? 'rgba(2,6,23,0.72)' : 'rgba(255,255,255,0.86)' }]}>
+          <View style={styles.progressTopRow}>
+            <Pressable
+              onPress={backToSignIn}
+              style={({ pressed }) => [
+                styles.backToLoginBtn,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.04)',
+                  opacity: pressed ? 0.86 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+            >
+              <MaterialCommunityIcons name="arrow-left" size={14} color={colors.text} />
+              <Text style={{ color: colors.text, fontSize: 12, fontWeight: '800' }}>
+                {t('auth.recovery.backToLogin')}
+              </Text>
+            </Pressable>
+
+            <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700' }}>
+              {t('auth.recovery.progressStep', { current: Math.min(progressStep, 3) })}
+            </Text>
+          </View>
+
           <View style={styles.progressBarWrap}>
             {[1, 2, 3].map((item) => (
               <View
@@ -620,9 +644,6 @@ export default function ForgotPasswordScreen() {
               />
             ))}
           </View>
-          <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700' }}>
-              {t('auth.recovery.progressStep', { current: Math.min(progressStep, 3) })}
-          </Text>
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -676,6 +697,21 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 14,
     gap: 9,
+  },
+  progressTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  backToLoginBtn: {
+    minHeight: 32,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   progressBarWrap: {
     flexDirection: 'row',
