@@ -1,7 +1,8 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
-import { socialService, type ConversationSummary } from '@/src/services/socialService';
+import { secureMessageService } from '@/src/services/secureMessageService';
+import type { ConversationSummary } from '@/src/services/socialService';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
@@ -101,7 +102,7 @@ export default function MessagesListScreen() {
     setError(null);
 
     try {
-      const rows = await socialService.getConversations();
+      const rows = await secureMessageService.getConversations();
       setConversations(rows);
     } catch (err: any) {
       console.warn('load conversations failed:', err?.message ?? err);
@@ -122,7 +123,7 @@ export default function MessagesListScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const rows = await socialService.getConversations();
+      const rows = await secureMessageService.getConversations();
       setConversations(rows);
       setError(null);
     } catch (err: any) {

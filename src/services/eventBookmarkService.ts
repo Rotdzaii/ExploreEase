@@ -59,6 +59,12 @@ const writePayload = async (storageKey: string, ids: string[]) => {
 };
 
 export const eventBookmarkService = {
+  async getBookmarkedIds(userId?: string | null): Promise<string[]> {
+    const storageKey = buildStorageKey(userId);
+    const payload = await readPayload(storageKey);
+    return payload.ids;
+  },
+
   async getIsBookmarked(eventId: string, userId?: string | null): Promise<boolean> {
     const normalizedEventId = normalizeEventId(eventId);
     if (!normalizedEventId) return false;

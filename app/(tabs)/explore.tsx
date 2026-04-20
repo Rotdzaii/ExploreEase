@@ -4,42 +4,56 @@ import { useLocation } from '@/hooks/useLocation';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import {
-  destinationService,
-  type DestinationDiscoveryRow,
-  type DiscoveryPriceFilter,
-  type DiscoveryQueryFilters,
-  type DiscoverySearchSuggestion,
-  type DiscoverySortOption,
+    destinationService,
+    type DestinationDiscoveryRow,
+    type DiscoveryPriceFilter,
+    type DiscoveryQueryFilters,
+    type DiscoverySearchSuggestion,
+    type DiscoverySortOption,
+    type NearbyTopRatedRow,
+    type PersonalizedRecommendationRow,
+    type SmartSearchLocalizationSource,
 } from '@/src/services/destinationService';
 import { eventService, type EventRow, type EventStatus } from '@/src/services/eventService';
+import { storageService } from '@/src/services/storageService';
+import { supabase } from '@/src/services/supabase';
+import { useLanguageStore } from '@/src/store/useLanguageStore';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { parseMoneyToNumber } from '@/utils/format';
 import {
-  formatDistance,
-  geocodeLocationText,
-  getEffectiveTargetLocation,
-  getHaversineDistance,
-  resolveEntityCoords,
-  useLocationOverrideStore,
+    formatDistance,
+    geocodeLocationText,
+    getEffectiveTargetLocation,
+    getHaversineDistance,
+    resolveEntityCoords,
+    useLocationOverrideStore,
 } from '@/utils/location';
 import { Feather } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  ImageBackground,
-  Modal,
-  NativeSyntheticEvent,
-  Pressable,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TextInputSubmitEditingEventData,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image,
+    ImageBackground,
+    Keyboard,
+    LayoutAnimation,
+    Modal,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TextInputSubmitEditingEventData,
+    TouchableOpacity,
+    UIManager,
+    View,
 } from 'react-native';
 
 const combineLocalDateTime = (dateText: string, timeText: string): Date | null => {
@@ -61,7 +75,21 @@ const FALLBACK_EVENT_IMAGE =
 
 type EventDateFilter = 'all' | 'today' | 'next-7-days' | 'this-month';
 
-const DISCOVERY_PAGE_SIZE = 20;
+type ExploreCategoryValue = 'all' | 'Cuisines' | 'Landmarks' | 'Activities';
+
+type ExploreCategoryChip = {
+  label: string;
+  value: ExploreCategoryValue;
+};
+
+const EXPLORE_CATEGORY_CHIPS: ExploreCategoryChip[] = [
+  { label: 'Tất cả', value: 'all' },
+  { label: 'Ẩm thực 🍜', value: 'Cuisines' },
+  { label: 'Tham quan 🏛️', value: 'Landmarks' },
+  { label: 'Hoạt động 🎢', value: 'Activities' },
+];
+
+const DISCOVERY_PAGE_SIZE = 10;
 const PRELOAD_SCROLL_THRESHOLD = 0.5;
 const NEARBY_RADIUS_KM = 5;
 const NEARBY_RADIUS_METERS = NEARBY_RADIUS_KM * 1000;
@@ -99,11 +127,28 @@ const getEventDateRange = (filter: EventDateFilter) => {
   return { startFrom: start, endTo: end } as const;
 };
 
+const releaseOverlayTriggerFocus = () => {
+  Keyboard.dismiss();
+
+  if (Platform.OS !== 'web') return;
+
+  try {
+    const activeElement = (globalThis as any)?.document?.activeElement as { blur?: () => void } | null | undefined;
+    if (activeElement && typeof activeElement.blur === 'function') {
+      activeElement.blur();
+    }
+  } catch {
+    // Ignore focus release failures on unsupported environments.
+  }
+};
+
 
 export default function ExploreScreen() {
   const params = useLocalSearchParams<{ q?: string | string[] }>();
   const { isDark } = useTheme();
   const { t, language } = useI18n();
+  const setLanguage = useLanguageStore((s) => s.setLanguage);
+  const { t: smartSearchT } = useTranslation('smartSearch');
   const addNotification = useNotificationStore((s) => s.addNotification);
   const { location: gpsLocation, errorMsg: gpsErrorMsg, isLoading: isLoadingGps } = useLocation();
   const locale = language === 'en' ? 'en-US' : 'vi-VN';
@@ -122,13 +167,13 @@ export default function ExploreScreen() {
   const [submittedSearchQuery, setSubmittedSearchQuery] = useState('');
   const [searchNonce, setSearchNonce] = useState(0);
   const [aiSmartSearchEnabled, setAiSmartSearchEnabled] = useState(false);
+  const [smartSearchLocalizationSource, setSmartSearchLocalizationSource] = useState<SmartSearchLocalizationSource>('default');
   const [suggestions, setSuggestions] = useState<DiscoverySearchSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const lastAppliedRouteQueryRef = useRef<string>('');
 
   const [categories, setCategories] = useState<CategoryRow[]>([]);
-  const [eventCategories, setEventCategories] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedCategory, setSelectedCategory] = useState<ExploreCategoryValue>('all');
   const [eventDateFilter, setEventDateFilter] = useState<EventDateFilter>('all');
   const [eventStatusFilter, setEventStatusFilter] = useState<EventStatus | 'all'>('all');
   const [ratingFilter, setRatingFilter] = useState<number | null>(null);
@@ -138,18 +183,30 @@ export default function ExploreScreen() {
 
   const [attractions, setAttractions] = useState<DestinationDiscoveryRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
+  const [eventCreatorProfiles, setEventCreatorProfiles] = useState<Record<string, { fullName: string; avatarUrl: string | null }>>({});
   const [distanceByKey, setDistanceByKey] = useState<Record<string, number>>({});
 
-  const [destinationOffset, setDestinationOffset] = useState(0);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
   const [eventOffset, setEventOffset] = useState(0);
-  const [hasMoreAttractions, setHasMoreAttractions] = useState(true);
-  const [hasMoreEvents, setHasMoreEvents] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const hasLoadedInitialRef = useRef(false);
   const loadRequestSeqRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [personalizedRecommendations, setPersonalizedRecommendations] = useState<PersonalizedRecommendationRow[]>([]);
+  const [loadingPersonalizedRecommendations, setLoadingPersonalizedRecommendations] = useState(true);
+  const [personalizedErrorMessage, setPersonalizedErrorMessage] = useState<string | null>(null);
+  const [personalizedRequiresLogin, setPersonalizedRequiresLogin] = useState(false);
+  const [fallbackInterestRecommendations, setFallbackInterestRecommendations] = useState<DestinationDiscoveryRow[]>([]);
+  const [loadingFallbackRecommendations, setLoadingFallbackRecommendations] = useState(false);
+  const personalizedRequestSeqRef = useRef(0);
+  const [nearbyTopRatedRows, setNearbyTopRatedRows] = useState<NearbyTopRatedRow[]>([]);
+  const [loadingNearbyTopRated, setLoadingNearbyTopRated] = useState(true);
+  const [nearbyTopRatedErrorMessage, setNearbyTopRatedErrorMessage] = useState<string | null>(null);
+  const [nearbyTopRatedPermissionDenied, setNearbyTopRatedPermissionDenied] = useState(false);
+  const nearbyTopRatedRequestSeqRef = useRef(0);
   const isLoading = loading || loadingMore;
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -187,6 +244,17 @@ export default function ExploreScreen() {
     return t('explore.category.general');
   }, [t]);
 
+  const isGpsPermissionDenied = useMemo(() => {
+    const message = String(gpsErrorMsg ?? '').trim().toLowerCase();
+    if (!message) return false;
+
+    return (
+      message.includes('từ chối') ||
+      message.includes('denied') ||
+      message.includes('permission')
+    );
+  }, [gpsErrorMsg]);
+
   const colors = useMemo(
     () => ({
       background: isDark ? ExploreEaseColors.background : '#f8fafc',
@@ -214,6 +282,7 @@ export default function ExploreScreen() {
     lastAppliedRouteQueryRef.current = normalizedIncoming;
     setSearchQuery(incomingRouteQuery);
     setSubmittedSearchQuery(incomingRouteQuery);
+    setSmartSearchLocalizationSource('default');
     setShowSuggestions(false);
     setSearchNonce((prev) => prev + 1);
   }, [incomingRouteQuery]);
@@ -221,6 +290,12 @@ export default function ExploreScreen() {
   useEffect(() => {
     setManualInput(manualLocationText);
   }, [manualLocationText]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    if (!UIManager.setLayoutAnimationEnabledExperimental) return;
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }, []);
 
   const effectiveTargetLocation = useMemo(
     () =>
@@ -232,39 +307,21 @@ export default function ExploreScreen() {
     [gpsLocation, isManualLocationEnabled, manualLocationCoords]
   );
 
-  const categoryOptions = useMemo(() => {
-    const fromDestinations = categories.map((c) => c.name).filter(Boolean);
-    const fromEvents = events.map((e) => String(e.category ?? '').trim()).filter(Boolean);
-
-    const merged = ['all', ...eventCategories, ...fromDestinations, ...fromEvents];
-    const seen = new Set<string>();
-    const result: string[] = [];
-
-    for (const item of merged) {
-      const key = item.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      result.push(item);
-    }
-
-    return result;
-  }, [categories, eventCategories, events]);
+  const selectedCategoryName = selectedCategory === 'all' ? null : selectedCategory;
+  const showDefaultExploreSections = selectedCategory === 'all';
 
   const selectedCategoryId = useMemo(() => {
-    if (selectedCategory === 'all') return null;
-    const hit = categories.find((c) => c.name.toLowerCase() === selectedCategory.toLowerCase());
+    if (!selectedCategoryName) return null;
+    const hit = categories.find((c) => c.name.toLowerCase() === selectedCategoryName.toLowerCase());
     return hit?.id ?? null;
-  }, [categories, selectedCategory]);
+  }, [categories, selectedCategoryName]);
 
   useEffect(() => {
     let cancelled = false;
 
-    const loadCategoriesAndEventCategories = async () => {
+    const loadCategories = async () => {
       try {
-        const [destinationRows, eventCategoryRows] = await Promise.all([
-          destinationService.getCategories(),
-          eventService.getDistinctCategories(),
-        ]);
+        const destinationRows = await destinationService.getCategories();
 
         if (cancelled) return;
 
@@ -273,20 +330,71 @@ export default function ExploreScreen() {
           .filter((row: CategoryRow) => !!row.name);
 
         setCategories(mapped);
-        setEventCategories((eventCategoryRows ?? []).map((item) => String(item).trim()).filter(Boolean));
       } catch {
         if (cancelled) return;
         setCategories([]);
-        setEventCategories([]);
       }
     };
 
-    void loadCategoriesAndEventCategories();
+    void loadCategories();
 
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const creatorIds = Array.from(
+      new Set(
+        events
+          .map((item) => String(item.creator_id ?? '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (creatorIds.length === 0) {
+      setEventCreatorProfiles({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadCreatorProfiles = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', creatorIds);
+
+      if (cancelled) return;
+
+      if (error) {
+        console.warn('load creator profiles failed:', error.message);
+        setEventCreatorProfiles({});
+        return;
+      }
+
+      const nextMap: Record<string, { fullName: string; avatarUrl: string | null }> = {};
+      for (const row of data ?? []) {
+        const id = String((row as any)?.id ?? '').trim();
+        if (!id) continue;
+
+        nextMap[id] = {
+          fullName: String((row as any)?.full_name ?? '').trim(),
+          avatarUrl: ((row as any)?.avatar_url ?? null) as string | null,
+        };
+      }
+
+      setEventCreatorProfiles(nextMap);
+    };
+
+    void loadCreatorProfiles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [events]);
 
   useEffect(() => {
     let cancelled = false;
@@ -319,14 +427,160 @@ export default function ExploreScreen() {
     };
   }, [searchQuery]);
 
+  const loadPersonalizedRecommendations = useCallback(async () => {
+    const requestSeq = ++personalizedRequestSeqRef.current;
+
+    setLoadingPersonalizedRecommendations(true);
+    setLoadingFallbackRecommendations(false);
+    setPersonalizedErrorMessage(null);
+    setPersonalizedRequiresLogin(false);
+    setFallbackInterestRecommendations([]);
+
+    try {
+      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+
+      const userId = String(userRes.user?.id ?? '').trim();
+      if (!userId) {
+        if (requestSeq !== personalizedRequestSeqRef.current) return;
+        setPersonalizedRecommendations([]);
+        setPersonalizedRequiresLogin(true);
+        setFallbackInterestRecommendations([]);
+        return;
+      }
+
+      const rows = await destinationService.getPersonalizedRecommendations(userId, 8);
+      if (requestSeq !== personalizedRequestSeqRef.current) return;
+
+      if (rows.length > 0) {
+        setPersonalizedRecommendations(rows);
+        setFallbackInterestRecommendations([]);
+        setLoadingFallbackRecommendations(false);
+      } else {
+        setPersonalizedRecommendations([]);
+        setLoadingFallbackRecommendations(true);
+
+        try {
+          const fallbackRowsRaw = await destinationService.getDestinationsForCurrentUserInterests(8);
+          if (requestSeq !== personalizedRequestSeqRef.current) return;
+
+          const fallbackRows = Array.isArray(fallbackRowsRaw)
+            ? (fallbackRowsRaw as DestinationDiscoveryRow[])
+            : [];
+
+          const dedupedFallbackRows: DestinationDiscoveryRow[] = [];
+          const seen = new Set<string>();
+          for (const row of fallbackRows) {
+            if (!row) continue;
+            const id = String((row as any)?.id ?? '').trim();
+            const name = String((row as any)?.name ?? '').trim();
+            if (!id || !name) continue;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            dedupedFallbackRows.push(row);
+          }
+
+          setFallbackInterestRecommendations(dedupedFallbackRows);
+        } catch (fallbackError: any) {
+          if (requestSeq !== personalizedRequestSeqRef.current) return;
+          console.warn('load fallback recommendations failed:', fallbackError?.message ?? fallbackError);
+          setFallbackInterestRecommendations([]);
+        } finally {
+          if (requestSeq !== personalizedRequestSeqRef.current) return;
+          setLoadingFallbackRecommendations(false);
+        }
+      }
+
+      setPersonalizedRequiresLogin(false);
+    } catch (error: any) {
+      if (requestSeq !== personalizedRequestSeqRef.current) return;
+      console.warn('loadPersonalizedRecommendations failed:', error?.message ?? error);
+      setPersonalizedRecommendations([]);
+      setFallbackInterestRecommendations([]);
+      setLoadingFallbackRecommendations(false);
+      setPersonalizedRequiresLogin(false);
+      setPersonalizedErrorMessage(String(error?.message ?? t('explore.error.loadResults')));
+    } finally {
+      if (requestSeq !== personalizedRequestSeqRef.current) return;
+      setLoadingPersonalizedRecommendations(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    void loadPersonalizedRecommendations();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(() => {
+      void loadPersonalizedRecommendations();
+    });
+
+    return () => {
+      personalizedRequestSeqRef.current += 1;
+      listener.subscription.unsubscribe();
+    };
+  }, [loadPersonalizedRecommendations]);
+
+  const loadNearbyTopRated = useCallback(async () => {
+    const requestSeq = ++nearbyTopRatedRequestSeqRef.current;
+
+    setLoadingNearbyTopRated(true);
+    setNearbyTopRatedErrorMessage(null);
+    setNearbyTopRatedPermissionDenied(false);
+
+    if (!gpsLocation) {
+      if (requestSeq !== nearbyTopRatedRequestSeqRef.current) return;
+
+      setNearbyTopRatedRows([]);
+
+      if (isLoadingGps) {
+        return;
+      }
+
+      if (isGpsPermissionDenied) {
+        setNearbyTopRatedPermissionDenied(true);
+      } else if (gpsErrorMsg) {
+        setNearbyTopRatedErrorMessage(String(gpsErrorMsg));
+      }
+
+      setLoadingNearbyTopRated(false);
+      return;
+    }
+
+    try {
+      const rows = await destinationService.getNearbyTopRated(
+        gpsLocation.latitude,
+        gpsLocation.longitude,
+        NEARBY_RADIUS_KM
+      );
+
+      if (requestSeq !== nearbyTopRatedRequestSeqRef.current) return;
+      setNearbyTopRatedRows(rows);
+    } catch (error: any) {
+      if (requestSeq !== nearbyTopRatedRequestSeqRef.current) return;
+      setNearbyTopRatedRows([]);
+      setNearbyTopRatedErrorMessage(String(error?.message ?? t('explore.error.loadResults')));
+    } finally {
+      if (requestSeq !== nearbyTopRatedRequestSeqRef.current) return;
+      setLoadingNearbyTopRated(false);
+    }
+  }, [gpsErrorMsg, gpsLocation, isGpsPermissionDenied, isLoadingGps, t]);
+
+  useEffect(() => {
+    void loadNearbyTopRated();
+
+    return () => {
+      nearbyTopRatedRequestSeqRef.current += 1;
+    };
+  }, [loadNearbyTopRated]);
+
   const loadDiscovery = useCallback(
     async (input: {
       showSpinner: boolean;
       append: boolean;
-      destinationOffset: number;
+      page: number;
       eventOffset: number;
     }) => {
-      const { showSpinner, append, destinationOffset: nextDestinationOffset, eventOffset: nextEventOffset } = input;
+      const { showSpinner, append, page: nextPage, eventOffset: nextEventOffset } = input;
+      const nextDestinationOffset = nextPage * DISCOVERY_PAGE_SIZE;
       const requestSeq = ++loadRequestSeqRef.current;
 
       if (showSpinner) setLoading(true);
@@ -343,11 +597,20 @@ export default function ExploreScreen() {
 
         let destinationRows: DestinationDiscoveryRow[] = [];
         let eventRows: EventRow[] = [];
+        const shouldLoadEvents = selectedCategory === 'all';
+        const dateRange = getEventDateRange(eventDateFilter);
+        const eventOrderBy: 'start_time' | 'created_at' | 'title' =
+          sortBy === 'a-z' ? 'title' : sortBy === 'top-rated' ? 'start_time' : (normalizedSearchQuery ? 'start_time' : 'created_at');
+        const eventAscending: boolean = sortBy === 'a-z' || sortBy === 'top-rated' || !!normalizedSearchQuery;
 
         if (useAiSmartSearch) {
-          const aiRows = await destinationService.searchDestinationsByAI(normalizedSearchQuery);
+          const aiResult = await destinationService.searchDestinationsByAI(normalizedSearchQuery, {
+            currentLanguage: language,
+          });
+          const aiRows = aiResult.rows;
+          setSmartSearchLocalizationSource(aiResult.localizationSource);
 
-          const selectedCategoryLower = selectedCategory.toLowerCase();
+          const selectedCategoryLower = selectedCategoryName?.toLowerCase() ?? 'all';
           destinationRows = aiRows.filter((row) => {
             if (selectedCategoryId !== null && typeof selectedCategoryId !== 'undefined') {
               return String(row.category_id ?? '') === String(selectedCategoryId);
@@ -378,12 +641,28 @@ export default function ExploreScreen() {
             return true;
           });
 
-          eventRows = [];
+          if (shouldLoadEvents) {
+            eventRows = await eventService.getEvents({
+              search: normalizedSearchQuery || undefined,
+              category: selectedCategoryName ?? undefined,
+              status: eventStatusFilter,
+              freeOnly: priceFilter === 'free' ? true : undefined,
+              minPrice: priceFilter === 'paid' ? 0.01 : undefined,
+              startFrom: dateRange.startFrom,
+              endTo: dateRange.endTo,
+              limit: DISCOVERY_PAGE_SIZE,
+              offset: 0,
+              orderBy: eventOrderBy,
+              ascending: eventAscending,
+            });
+          }
         } else {
+          setSmartSearchLocalizationSource('default');
+
           const destinationFilters: DiscoveryQueryFilters = {
             search: normalizedSearchQuery || undefined,
             categoryId: selectedCategoryId,
-            categoryName: selectedCategory !== 'all' ? selectedCategory : null,
+            categoryName: selectedCategoryName,
             ratingMin: ratingFilter,
             priceFilter,
             sort: sortBy,
@@ -391,30 +670,30 @@ export default function ExploreScreen() {
             offset: nextDestinationOffset,
           };
 
-          const dateRange = getEventDateRange(eventDateFilter);
-          const eventOrderBy: 'start_time' | 'created_at' | 'title' =
-            sortBy === 'a-z' ? 'title' : sortBy === 'top-rated' ? 'start_time' : (normalizedSearchQuery ? 'start_time' : 'created_at');
-          const eventAscending: boolean = sortBy === 'a-z' || sortBy === 'top-rated' || !!normalizedSearchQuery;
+          if (shouldLoadEvents) {
+            const [destinationRowsRes, eventRowsRes] = await Promise.all([
+              destinationService.getDestinationsForDiscovery(destinationFilters),
+              eventService.getEvents({
+                search: normalizedSearchQuery || undefined,
+                category: selectedCategoryName ?? undefined,
+                status: eventStatusFilter,
+                freeOnly: priceFilter === 'free' ? true : undefined,
+                minPrice: priceFilter === 'paid' ? 0.01 : undefined,
+                startFrom: dateRange.startFrom,
+                endTo: dateRange.endTo,
+                limit: DISCOVERY_PAGE_SIZE,
+                offset: nextEventOffset,
+                orderBy: eventOrderBy,
+                ascending: eventAscending,
+              }),
+            ]);
 
-          const [destinationRowsRes, eventRowsRes] = await Promise.all([
-            destinationService.getDestinationsForDiscovery(destinationFilters),
-            eventService.getEvents({
-              search: normalizedSearchQuery || undefined,
-              category: selectedCategory !== 'all' ? selectedCategory : undefined,
-              status: eventStatusFilter,
-              freeOnly: priceFilter === 'free' ? true : undefined,
-              minPrice: priceFilter === 'paid' ? 0.01 : undefined,
-              startFrom: dateRange.startFrom,
-              endTo: dateRange.endTo,
-              limit: DISCOVERY_PAGE_SIZE,
-              offset: nextEventOffset,
-              orderBy: eventOrderBy,
-              ascending: eventAscending,
-            }),
-          ]);
-
-          destinationRows = destinationRowsRes;
-          eventRows = eventRowsRes;
+            destinationRows = destinationRowsRes;
+            eventRows = eventRowsRes;
+          } else {
+            destinationRows = await destinationService.getDestinationsForDiscovery(destinationFilters);
+            eventRows = [];
+          }
         }
 
         let nextAttractions = destinationRows;
@@ -500,17 +779,16 @@ export default function ExploreScreen() {
 
         const loadedDestinationCount = destinationRows.length;
         const loadedEventCount = eventRows.length;
+        const nextHasMore = loadedDestinationCount >= DISCOVERY_PAGE_SIZE;
 
         if (useAiSmartSearch) {
-          setDestinationOffset(loadedDestinationCount);
+          setPage(0);
+          setHasMore(false);
           setEventOffset(0);
-          setHasMoreAttractions(false);
-          setHasMoreEvents(false);
         } else {
-          setDestinationOffset(nextDestinationOffset + loadedDestinationCount);
+          setPage(nextPage);
+          setHasMore(nextHasMore);
           setEventOffset(nextEventOffset + loadedEventCount);
-          setHasMoreAttractions(loadedDestinationCount >= DISCOVERY_PAGE_SIZE);
-          setHasMoreEvents(loadedEventCount >= DISCOVERY_PAGE_SIZE);
         }
 
         hasLoadedInitialRef.current = true;
@@ -532,8 +810,10 @@ export default function ExploreScreen() {
       nearbyOnly,
       priceFilter,
       ratingFilter,
+      language,
       submittedSearchQuery,
       selectedCategory,
+      selectedCategoryName,
       selectedCategoryId,
       sortBy,
       t,
@@ -542,36 +822,43 @@ export default function ExploreScreen() {
 
   useEffect(() => {
     hasLoadedInitialRef.current = false;
-    setDestinationOffset(0);
+    setAttractions([]);
+    setEvents([]);
+    setDistanceByKey({});
+    setPage(0);
+    setHasMore(true);
     setEventOffset(0);
-    setHasMoreAttractions(true);
-    setHasMoreEvents(true);
     void loadDiscovery({
       showSpinner: true,
       append: false,
-      destinationOffset: 0,
+      page: 0,
       eventOffset: 0,
     });
-  }, [loadDiscovery, searchNonce]);
+  }, [loadDiscovery, searchNonce, selectedCategory]);
 
   const onRefresh = useCallback(() => {
     hasLoadedInitialRef.current = false;
-    setDestinationOffset(0);
+    setAttractions([]);
+    setEvents([]);
+    setDistanceByKey({});
+    setPage(0);
+    setHasMore(true);
     setEventOffset(0);
-    setHasMoreAttractions(true);
-    setHasMoreEvents(true);
     void loadDiscovery({
       showSpinner: false,
       append: false,
-      destinationOffset: 0,
+      page: 0,
       eventOffset: 0,
     });
-  }, [loadDiscovery]);
+    void loadPersonalizedRecommendations();
+    void loadNearbyTopRated();
+  }, [loadDiscovery, loadNearbyTopRated, loadPersonalizedRecommendations]);
 
   const onResetFilters = useCallback(() => {
     setSearchQuery('');
     setSubmittedSearchQuery('');
     setSearchNonce((prev) => prev + 1);
+    setSmartSearchLocalizationSource('default');
     setSuggestions([]);
     setShowSuggestions(false);
     setSelectedCategory('all');
@@ -583,20 +870,59 @@ export default function ExploreScreen() {
     setNearbyOnly(false);
   }, []);
 
+  const onSelectCategory = useCallback((value: ExploreCategoryValue) => {
+    if (value === selectedCategory) return;
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    hasLoadedInitialRef.current = false;
+    setAttractions([]);
+    setEvents([]);
+    setDistanceByKey({});
+    setPage(0);
+    setHasMore(true);
+    setEventOffset(0);
+    setSelectedCategory(value);
+    if (value !== 'all') {
+      setEventDateFilter('all');
+      setEventStatusFilter('all');
+    }
+  }, [selectedCategory]);
+
   const onMaybePreloadNextPage = useCallback(() => {
     if (!hasLoadedInitialRef.current) return;
     if (loading || loadingMore) return;
     if (errorMessage) return;
     if (aiSmartSearchEnabled && !!submittedSearchQuery.trim()) return; //Nếu có đk, nâng cấp lên realtime nếu thoải mái được request từ model
-    if (!hasMoreAttractions && !hasMoreEvents) return;
+    if (!hasMore) return;
 
     void loadDiscovery({
       showSpinner: false,
       append: true,
-      destinationOffset,
+      page: page + 1,
       eventOffset,
     });
-  }, [destinationOffset, errorMessage, eventOffset, hasMoreAttractions, hasMoreEvents, loadDiscovery, loading, loadingMore, aiSmartSearchEnabled, submittedSearchQuery]);
+  }, [aiSmartSearchEnabled, errorMessage, eventOffset, hasMore, loadDiscovery, loading, loadingMore, page, submittedSearchQuery]);
+
+  const onEndReachedDiscovery = useCallback(() => {
+    const nextOffset = (page + 1) * DISCOVERY_PAGE_SIZE;
+    console.log('[Explore][InfiniteScroll] onEndReached', {
+      offset: nextOffset,
+      dataLength: attractions.length,
+      page,
+      hasMore,
+      loading,
+      loadingMore,
+    });
+
+    onMaybePreloadNextPage();
+  }, [attractions.length, hasMore, loading, loadingMore, onMaybePreloadNextPage, page]);
+
+  const onDiscoveryListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const nearListEnd = contentOffset.y + layoutMeasurement.height >= contentSize.height - 280;
+    if (nearListEnd) {
+      onMaybePreloadNextPage();
+    }
+  }, [onMaybePreloadNextPage]);
 
   const executeSmartSearch = useCallback((eventOrText?: NativeSyntheticEvent<TextInputSubmitEditingEventData> | string) => {
     if (isLoading) return;
@@ -609,6 +935,7 @@ export default function ExploreScreen() {
 
     setSearchQuery(nextText);
     setSubmittedSearchQuery(nextQuery);
+    setSmartSearchLocalizationSource('default');
     setShowSuggestions(false);
     setSearchNonce((prev) => prev + 1);
   }, [isLoading, searchQuery]);
@@ -677,7 +1004,7 @@ export default function ExploreScreen() {
       }
 
       if (end <= start) {
-        Alert.alert(t('events.form.error.invalidDateTimeTitle'), t('events.form.error.endAfterStart'));
+        Alert.alert(t('events.form.error.invalidDateTimeTitle'), 'Ngày kết thúc phải sau ngày bắt đầu');
         throw new Error('end_time must be greater than start_time');
       }
 
@@ -688,6 +1015,16 @@ export default function ExploreScreen() {
       }
 
       try {
+        let uploadedImageUrl: string | null = null;
+        if (form.imageUri.trim()) {
+          const uploaded = await storageService.uploadEventImage({
+            uri: form.imageUri.trim(),
+            fileName: form.imageFileName || undefined,
+            contentType: form.imageMimeType || undefined,
+          });
+          uploadedImageUrl = uploaded.publicUrl;
+        }
+
         await eventService.createEventForCurrentUser({
           title: form.title,
           category: form.category,
@@ -695,7 +1032,7 @@ export default function ExploreScreen() {
           start_time: start,
           end_time: end,
           price,
-          image_url: form.imageUrl.trim() ? form.imageUrl.trim() : null,
+          image_url: uploadedImageUrl,
           description: form.description.trim() ? form.description.trim() : null,
         });
 
@@ -705,14 +1042,16 @@ export default function ExploreScreen() {
           type: 'success',
         });
         hasLoadedInitialRef.current = false;
-        setDestinationOffset(0);
+        setAttractions([]);
+        setEvents([]);
+        setDistanceByKey({});
+        setPage(0);
+        setHasMore(true);
         setEventOffset(0);
-        setHasMoreAttractions(true);
-        setHasMoreEvents(true);
         await loadDiscovery({
           showSpinner: false,
           append: false,
-          destinationOffset: 0,
+          page: 0,
           eventOffset: 0,
         });
       } catch (err: any) {
@@ -748,6 +1087,107 @@ export default function ExploreScreen() {
     } as any);
   }, []);
 
+  const renderRecommendationCard = useCallback(
+    (item: DestinationDiscoveryRow, options?: { showReason?: boolean; showDistance?: boolean }) => {
+      const reasonText = options?.showReason
+        ? String((item as PersonalizedRecommendationRow).reason ?? '').trim()
+        : '';
+      const rawDistanceKm = (item as NearbyTopRatedRow).distance_km;
+      const distanceKm =
+        typeof rawDistanceKm === 'number' && Number.isFinite(rawDistanceKm)
+          ? rawDistanceKm
+          : null;
+      const distanceText =
+        options?.showDistance && distanceKm !== null
+          ? formatDistance(distanceKm * 1000)
+          : '';
+
+      return (
+        <Pressable
+          onPress={() => onOpenDestination(item)}
+          style={({ pressed }) => [
+            styles.personalizedCard,
+            { backgroundColor: colors.inputBg, borderColor: colors.border },
+            pressed ? { opacity: 0.86 } : null,
+          ]}
+          accessibilityRole="button"
+        >
+          <ImageBackground
+            source={{ uri: item.image_url || FALLBACK_DESTINATION_IMAGE }}
+            style={styles.personalizedImage}
+            imageStyle={styles.personalizedImageStyle}
+            resizeMode="cover"
+          >
+            <View style={styles.personalizedImageOverlay} />
+            <View style={styles.personalizedImageInner}>
+              <Text style={styles.personalizedTag}>{toCategoryName(item)}</Text>
+            </View>
+          </ImageBackground>
+
+          <View style={styles.personalizedBody}>
+            <Text style={[styles.personalizedTitle, { color: colors.title }]} numberOfLines={2}>
+              {item.name}
+            </Text>
+            <Text style={[styles.personalizedMeta, { color: colors.muted }]} numberOfLines={1}>
+              {item.location || t('common.unknownLocation')}
+            </Text>
+
+            {!!reasonText ? (
+              <View
+                style={[
+                  styles.personalizedReasonBadge,
+                  {
+                    borderColor: isDark ? 'rgba(34,211,238,0.34)' : 'rgba(8,145,178,0.32)',
+                    backgroundColor: isDark ? 'rgba(34,211,238,0.16)' : 'rgba(34,211,238,0.12)',
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.personalizedReasonText,
+                    { color: isDark ? '#67e8f9' : '#0e7490' },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {reasonText}
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={styles.personalizedBottomRow}>
+              <Text style={[styles.personalizedPrice, { color: ExploreEaseColors.primary }]}>
+                {formatDestinationPriceText(item.price)}
+              </Text>
+              <View style={styles.inlineMetaRow}>
+                {typeof item.rating === 'number' ? (
+                  <Text style={[styles.personalizedMeta, { color: colors.muted }]}>
+                    {t('explore.meta.ratingWithStar', { rating: item.rating.toFixed(1) })}
+                  </Text>
+                ) : null}
+                {!!distanceText ? (
+                  <Text style={[styles.personalizedMeta, { color: colors.muted }]}>
+                    {distanceText}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          </View>
+        </Pressable>
+      );
+    },
+    [
+      colors.border,
+      colors.inputBg,
+      colors.muted,
+      colors.title,
+      formatDestinationPriceText,
+      isDark,
+      onOpenDestination,
+      t,
+      toCategoryName,
+    ]
+  );
+
   const onOpenEvent = useCallback((row: EventRow) => {
     router.push(`/event/${row.id}` as any);
   }, []);
@@ -765,6 +1205,24 @@ export default function ExploreScreen() {
 
   const isAiSearchActive = aiSmartSearchEnabled && !!submittedSearchQuery.trim();
 
+  const smartSearchLocalizationHint = useMemo(() => {
+    if (!isAiSearchActive) return '';
+
+    if (isLoading) {
+      return smartSearchT('translatingResults');
+    }
+
+    if (smartSearchLocalizationSource === 'localized_columns') {
+      return smartSearchT('usingLocalizedColumns');
+    }
+
+    if (smartSearchLocalizationSource === 'ai_fallback_translation') {
+      return smartSearchT('fallbackTranslation');
+    }
+
+    return '';
+  }, [isAiSearchActive, isLoading, smartSearchLocalizationSource, smartSearchT]);
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
       <FlatList
@@ -772,9 +1230,18 @@ export default function ExploreScreen() {
         keyExtractor={(item) => item}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
         onEndReachedThreshold={PRELOAD_SCROLL_THRESHOLD}
-        onEndReached={onMaybePreloadNextPage}
+        onEndReached={onEndReachedDiscovery}
+        onScroll={onDiscoveryListScroll}
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.listFooterLoading}>
+              <ActivityIndicator color={ExploreEaseColors.primary} />
+            </View>
+          ) : null
+        }
         renderItem={() => (
           <>
         <View style={styles.headerRow}>
@@ -784,7 +1251,10 @@ export default function ExploreScreen() {
           </View>
 
           <Pressable
-            onPress={() => setShowCreateModal(true)}
+            onPress={() => {
+              releaseOverlayTriggerFocus();
+              setShowCreateModal(true);
+            }}
             style={({ pressed }) => [styles.createBtn, pressed ? { opacity: 0.84 } : null]}
             accessibilityRole="button"
           >
@@ -794,14 +1264,61 @@ export default function ExploreScreen() {
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-          <Text style={[styles.label, { color: colors.title }]}>{t('explore.search.label')}</Text>
+          <Text style={[styles.label, { color: colors.title }]}>{smartSearchT('searchLabel')}</Text>
+          <View style={styles.smartSearchLanguageRow}>
+            <Text style={[styles.smartSearchLanguageLabel, { color: colors.muted }]}>
+              {smartSearchT('languageLabel')}: {language === 'en' ? smartSearchT('languageEn') : smartSearchT('languageVi')}
+            </Text>
+            <View style={styles.smartSearchLanguagePills}>
+              <Pressable
+                onPress={() => setLanguage('vi')}
+                disabled={isLoading || language === 'vi'}
+                style={({ pressed }) => [
+                  styles.smartSearchLanguagePill,
+                  language === 'vi' ? styles.smartSearchLanguagePillActive : null,
+                  (isLoading || language === 'vi') ? { opacity: 0.6 } : null,
+                  pressed ? { opacity: 0.84 } : null,
+                ]}
+                accessibilityRole="button"
+              >
+                <Text
+                  style={[
+                    styles.smartSearchLanguagePillText,
+                    { color: language === 'vi' ? '#001018' : colors.text },
+                  ]}
+                >
+                  {smartSearchT('languageVi')}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setLanguage('en')}
+                disabled={isLoading || language === 'en'}
+                style={({ pressed }) => [
+                  styles.smartSearchLanguagePill,
+                  language === 'en' ? styles.smartSearchLanguagePillActive : null,
+                  (isLoading || language === 'en') ? { opacity: 0.6 } : null,
+                  pressed ? { opacity: 0.84 } : null,
+                ]}
+                accessibilityRole="button"
+              >
+                <Text
+                  style={[
+                    styles.smartSearchLanguagePillText,
+                    { color: language === 'en' ? '#001018' : colors.text },
+                  ]}
+                >
+                  {smartSearchT('languageEn')}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
           <View style={[styles.searchWrap, { backgroundColor: colors.inputBg, borderColor: colors.border }]}> 
             <Feather name="search" size={16} color={colors.muted} />
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
               onSubmitEditing={executeSmartSearch}
-              placeholder={t('explore.search.placeholder')}
+              placeholder={smartSearchT('searchPlaceholder')}
               placeholderTextColor={colors.muted}
               style={[styles.searchInput, { color: colors.text }]}
               autoCorrect={false}
@@ -814,6 +1331,7 @@ export default function ExploreScreen() {
                 onPress={() => {
                   setSearchQuery('');
                   setSubmittedSearchQuery('');
+                  setSmartSearchLocalizationSource('default');
                   setSearchNonce((prev) => prev + 1);
                   setSuggestions([]);
                   setShowSuggestions(false);
@@ -833,7 +1351,7 @@ export default function ExploreScreen() {
                 isLoading ? { opacity: 0.6 } : null,
               ]}
               accessibilityRole="button"
-              accessibilityLabel={t('explore.search.label')}
+              accessibilityLabel={smartSearchT('submit')}
             >
               <Feather name="arrow-right" size={16} color="#001018" />
             </TouchableOpacity>
@@ -841,7 +1359,15 @@ export default function ExploreScreen() {
 
           <View style={styles.aiToggleRow}>
             <Pressable
-              onPress={() => setAiSmartSearchEnabled((prev) => !prev)}
+              onPress={() => {
+                setAiSmartSearchEnabled((prev) => {
+                  const next = !prev;
+                  if (!next) {
+                    setSmartSearchLocalizationSource('default');
+                  }
+                  return next;
+                });
+              }}
               style={({ pressed }) => [
                 styles.aiToggleButton,
                 { borderColor: colors.border, backgroundColor: colors.inputBg },
@@ -860,6 +1386,10 @@ export default function ExploreScreen() {
             <Text style={[styles.aiToggleHint, { color: colors.muted }]}>
               {aiSmartSearchEnabled ? t('explore.search.aiHintOn') : t('explore.search.aiHintOff')}
             </Text>
+
+            {isAiSearchActive && !!smartSearchLocalizationHint ? (
+              <Text style={[styles.aiToggleHint, { color: colors.muted }]}>{smartSearchLocalizationHint}</Text>
+            ) : null}
           </View>
 
           {showSuggestions && suggestions.length > 0 ? (
@@ -900,6 +1430,181 @@ export default function ExploreScreen() {
             </View>
           </View>
         </View>
+
+        {showDefaultExploreSections ? (
+          <>
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+              <View style={styles.personalizedHeaderRow}>
+                <Text style={[styles.label, { color: colors.title }]}>Dành riêng cho bạn</Text>
+                {loadingPersonalizedRecommendations ? (
+                  <ActivityIndicator color={ExploreEaseColors.primary} size="small" />
+                ) : null}
+              </View>
+
+              {loadingPersonalizedRecommendations ? (
+                <View style={styles.personalizedSkeletonRow}>
+                  {[0, 1, 2].map((index) => (
+                    <View
+                      key={`personalized-skeleton-${index}`}
+                      style={[
+                        styles.personalizedSkeletonCard,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: colors.inputBg,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.personalizedSkeletonImage,
+                          { backgroundColor: isDark ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.28)' },
+                        ]}
+                      />
+                      <View
+                        style={[
+                          styles.personalizedSkeletonLine,
+                          { backgroundColor: isDark ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.28)' },
+                        ]}
+                      />
+                      <View
+                        style={[
+                          styles.personalizedSkeletonLineShort,
+                          { backgroundColor: isDark ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.28)' },
+                        ]}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : personalizedErrorMessage ? (
+                <View style={styles.personalizedStateWrap}>
+                  <Text style={[styles.helperErrorText, { color: '#ef4444' }]} numberOfLines={2}>
+                    {personalizedErrorMessage}
+                  </Text>
+                  <Pressable
+                    onPress={() => void loadPersonalizedRecommendations()}
+                    style={styles.retryBtn}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.retryBtnText}>{t('common.retry')}</Text>
+                  </Pressable>
+                </View>
+              ) : personalizedRecommendations.length > 0 ? (
+                <FlatList
+                  data={personalizedRecommendations}
+                  horizontal
+                  nestedScrollEnabled
+                  keyExtractor={(item) => `personalized:${String(item.id)}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.personalizedList}
+                  ItemSeparatorComponent={() => <View style={{ width: 10 }} />}
+                  renderItem={({ item }) => renderRecommendationCard(item, { showReason: true })}
+                />
+              ) : loadingFallbackRecommendations ? (
+                <View style={styles.personalizedStateWrap}>
+                  <ActivityIndicator color={ExploreEaseColors.primary} size="small" />
+                  <Text style={[styles.targetInfoText, { color: colors.muted }]}>Đang tìm gợi ý theo sở thích của bạn...</Text>
+                </View>
+              ) : fallbackInterestRecommendations.length > 0 ? (
+                <View style={styles.personalizedFallbackWrap}>
+                  <Text style={[styles.personalizedFallbackTitle, { color: colors.title }]}>Dựa trên sở thích của bạn</Text>
+                  <FlatList
+                    data={fallbackInterestRecommendations}
+                    horizontal
+                    nestedScrollEnabled
+                    keyExtractor={(item) => `fallback-interest:${String(item.id)}`}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.personalizedList}
+                    ItemSeparatorComponent={() => <View style={{ width: 10 }} />}
+                    renderItem={({ item }) => renderRecommendationCard(item)}
+                  />
+                </View>
+              ) : (
+                <Text style={[styles.targetInfoText, { color: colors.muted }]}>
+                  {personalizedRequiresLogin
+                    ? 'Đăng nhập để xem gợi ý dành riêng cho bạn.'
+                    : 'Chưa có gợi ý phù hợp lúc này.'}
+                </Text>
+              )}
+            </View>
+
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+              <View style={styles.personalizedHeaderRow}>
+                <Text style={[styles.label, { color: colors.title }]}>Gần bạn & Đánh giá cao</Text>
+                {loadingNearbyTopRated ? (
+                  <ActivityIndicator color={ExploreEaseColors.primary} size="small" />
+                ) : null}
+              </View>
+
+              {loadingNearbyTopRated ? (
+                <View style={styles.personalizedSkeletonRow}>
+                  {[0, 1, 2].map((index) => (
+                    <View
+                      key={`nearby-top-rated-skeleton-${index}`}
+                      style={[
+                        styles.personalizedSkeletonCard,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: colors.inputBg,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.personalizedSkeletonImage,
+                          { backgroundColor: isDark ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.28)' },
+                        ]}
+                      />
+                      <View
+                        style={[
+                          styles.personalizedSkeletonLine,
+                          { backgroundColor: isDark ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.28)' },
+                        ]}
+                      />
+                      <View
+                        style={[
+                          styles.personalizedSkeletonLineShort,
+                          { backgroundColor: isDark ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.28)' },
+                        ]}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : nearbyTopRatedPermissionDenied ? (
+                <Text style={[styles.targetInfoText, { color: colors.muted }]}>Bật quyền vị trí trong cài đặt để xem các địa điểm gần bạn.</Text>
+              ) : nearbyTopRatedErrorMessage ? (
+                <View style={styles.personalizedStateWrap}>
+                  <Text style={[styles.helperErrorText, { color: '#ef4444' }]} numberOfLines={2}>
+                    {nearbyTopRatedErrorMessage}
+                  </Text>
+                  <Pressable
+                    onPress={() => void loadNearbyTopRated()}
+                    style={styles.retryBtn}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.retryBtnText}>{t('common.retry')}</Text>
+                  </Pressable>
+                </View>
+              ) : nearbyTopRatedRows.length > 0 ? (
+                <FlatList
+                  data={nearbyTopRatedRows}
+                  horizontal
+                  nestedScrollEnabled
+                  keyExtractor={(item) => `nearby-top-rated:${String(item.id)}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.personalizedList}
+                  ItemSeparatorComponent={() => <View style={{ width: 10 }} />}
+                  renderItem={({ item }) => renderRecommendationCard(item, { showDistance: true })}
+                />
+              ) : (
+                <Text style={[styles.targetInfoText, { color: colors.muted }]}>
+                  {gpsLocation
+                    ? 'Chưa có địa điểm gần bạn trong phạm vi hiện tại.'
+                    : 'Bật vị trí để khám phá địa điểm gần bạn.'}
+                </Text>
+              )}
+            </View>
+          </>
+        ) : null}
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
           <Text style={[styles.label, { color: colors.title }]}>{t('explore.targetLocation.title')}</Text>
@@ -976,13 +1681,13 @@ export default function ExploreScreen() {
             ) : null}
           </View>
 
-          <FilterSection label={t('explore.filter.category')} color={colors.title}>
-            {categoryOptions.map((value) => (
+          <FilterSection label={t('explore.filter.category')} color={colors.title} horizontal>
+            {EXPLORE_CATEGORY_CHIPS.map((item) => (
               <FilterChip
-                key={value}
-                selected={selectedCategory.toLowerCase() === value.toLowerCase()}
-                label={value === 'all' ? t('common.all') : value}
-                onPress={() => setSelectedCategory(value)}
+                key={item.value}
+                selected={selectedCategory === item.value}
+                label={item.label}
+                onPress={() => onSelectCategory(item.value)}
               />
             ))}
           </FilterSection>
@@ -999,39 +1704,43 @@ export default function ExploreScreen() {
             <FilterChip selected={priceFilter === 'paid'} label={t('common.paid')} onPress={() => setPriceFilter('paid')} />
           </FilterSection>
 
-          <FilterSection label={t('explore.filter.eventDate')} color={colors.title}>
-            <FilterChip selected={eventDateFilter === 'all'} label={t('common.all')} onPress={() => setEventDateFilter('all')} />
-            <FilterChip selected={eventDateFilter === 'today'} label={t('explore.filter.today')} onPress={() => setEventDateFilter('today')} />
-            <FilterChip
-              selected={eventDateFilter === 'next-7-days'}
-              label={t('explore.filter.next7Days')}
-              onPress={() => setEventDateFilter('next-7-days')}
-            />
-            <FilterChip
-              selected={eventDateFilter === 'this-month'}
-              label={t('explore.filter.thisMonth')}
-              onPress={() => setEventDateFilter('this-month')}
-            />
-          </FilterSection>
+          {showDefaultExploreSections ? (
+            <>
+              <FilterSection label={t('explore.filter.eventDate')} color={colors.title}>
+                <FilterChip selected={eventDateFilter === 'all'} label={t('common.all')} onPress={() => setEventDateFilter('all')} />
+                <FilterChip selected={eventDateFilter === 'today'} label={t('explore.filter.today')} onPress={() => setEventDateFilter('today')} />
+                <FilterChip
+                  selected={eventDateFilter === 'next-7-days'}
+                  label={t('explore.filter.next7Days')}
+                  onPress={() => setEventDateFilter('next-7-days')}
+                />
+                <FilterChip
+                  selected={eventDateFilter === 'this-month'}
+                  label={t('explore.filter.thisMonth')}
+                  onPress={() => setEventDateFilter('this-month')}
+                />
+              </FilterSection>
 
-          <FilterSection label={t('explore.filter.eventStatus')} color={colors.title}>
-            <FilterChip selected={eventStatusFilter === 'all'} label={t('common.all')} onPress={() => setEventStatusFilter('all')} />
-            <FilterChip
-              selected={eventStatusFilter === 'incoming'}
-              label={t('event.status.incoming')}
-              onPress={() => setEventStatusFilter('incoming')}
-            />
-            <FilterChip
-              selected={eventStatusFilter === 'ongoing'}
-              label={t('event.status.ongoing')}
-              onPress={() => setEventStatusFilter('ongoing')}
-            />
-            <FilterChip
-              selected={eventStatusFilter === 'completed'}
-              label={t('event.status.completed')}
-              onPress={() => setEventStatusFilter('completed')}
-            />
-          </FilterSection>
+              <FilterSection label={t('explore.filter.eventStatus')} color={colors.title}>
+                <FilterChip selected={eventStatusFilter === 'all'} label={t('common.all')} onPress={() => setEventStatusFilter('all')} />
+                <FilterChip
+                  selected={eventStatusFilter === 'incoming'}
+                  label={t('event.status.incoming')}
+                  onPress={() => setEventStatusFilter('incoming')}
+                />
+                <FilterChip
+                  selected={eventStatusFilter === 'ongoing'}
+                  label={t('event.status.ongoing')}
+                  onPress={() => setEventStatusFilter('ongoing')}
+                />
+                <FilterChip
+                  selected={eventStatusFilter === 'completed'}
+                  label={t('event.status.completed')}
+                  onPress={() => setEventStatusFilter('completed')}
+                />
+              </FilterSection>
+            </>
+          ) : null}
 
           <FilterSection label={t('explore.filter.sort')} color={colors.title}>
             <FilterChip selected={sortBy === 'relevance'} label={t('explore.sort.relevance')} onPress={() => setSortBy('relevance')} />
@@ -1126,84 +1835,109 @@ export default function ExploreScreen() {
               })
             )}
 
-            <View style={styles.sectionHead}>
-              <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('explore.events', { count: events.length })}</Text>
-              <Pressable onPress={() => setShowCreateModal(true)} accessibilityRole="button">
-                <Text style={{ color: ExploreEaseColors.primary, fontWeight: '800', fontSize: 12 }}>{t('explore.createEvent')}</Text>
-              </Pressable>
-            </View>
-
-            {events.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.muted }]}>
-                {isAiSearchActive ? t('explore.search.aiNoEvents') : t('explore.noEvents')}
-              </Text>
-            ) : (
-              events.map((item) => {
-                const key = `event:${String(item.id)}`;
-                const distanceMeters = distanceByKey[key];
-
-                return (
-                  <View
-                    key={key}
-                    style={[styles.resultCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+            {showDefaultExploreSections ? (
+              <>
+                <View style={styles.sectionHead}>
+                  <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('explore.events', { count: events.length })}</Text>
+                  <Pressable
+                    onPress={() => {
+                      releaseOverlayTriggerFocus();
+                      setShowCreateModal(true);
+                    }}
+                    accessibilityRole="button"
                   >
-                    <View style={styles.resultImageWrap}>
-                      <ImageBackground
-                        source={{ uri: item.image_url || FALLBACK_EVENT_IMAGE }}
-                        style={styles.resultImage}
-                        imageStyle={styles.resultImageStyle}
-                        resizeMode="cover"
-                      >
-                        <View style={styles.resultImageOverlay} />
-                        <View style={styles.resultImageInner}>
-                          <Text style={styles.resultTag}>{item.category || t('explore.suggestion.event')}</Text>
-                        </View>
-                        <View style={[styles.resultImageBase, { backgroundColor: 'rgba(34, 211, 238, 0.18)' }]}>
-                          <Text style={{ color: '#001018', fontWeight: '900', fontSize: 11 }}>{t('explore.suggestion.event')}</Text>
-                        </View>
-                      </ImageBackground>
-                    </View>
+                    <Text style={{ color: ExploreEaseColors.primary, fontWeight: '800', fontSize: 12 }}>{t('explore.createEvent')}</Text>
+                  </Pressable>
+                </View>
 
-                    <View style={styles.resultBody}>
-                      <Text style={[styles.resultTitle, { color: colors.title }]} numberOfLines={2}>
-                        {item.title}
-                      </Text>
-                      <Text style={[styles.resultMeta, { color: colors.muted }]} numberOfLines={1}>
-                        {item.location || t('common.unknownLocation')}
-                      </Text>
-                      <Text style={[styles.resultMeta, { color: colors.muted }]} numberOfLines={1}>
-                        {formatDateTimeText(item.start_time)}
-                      </Text>
-                      <View style={styles.resultBottomRow}>
-                        <Text style={[styles.resultPrice, { color: ExploreEaseColors.primary }]}>{formatEventPriceText(item.price)}</Text>
-                        <View style={styles.inlineMetaRow}>
-                          <Text style={[styles.resultMeta, { color: colors.muted }]}>
-                            {getEventStatusLabel(item.status)}
+                {events.length === 0 ? (
+                  <Text style={[styles.emptyText, { color: colors.muted }]}>
+                    {isAiSearchActive ? t('explore.search.aiNoEvents') : t('explore.noEvents')}
+                  </Text>
+                ) : (
+                  events.map((item) => {
+                    const key = `event:${String(item.id)}`;
+                    const distanceMeters = distanceByKey[key];
+                    const creatorId = String(item.creator_id ?? '').trim();
+                    const creatorPreview = creatorId ? eventCreatorProfiles[creatorId] : undefined;
+                    const creatorName = String(creatorPreview?.fullName ?? '').trim() || t('social.feed.someone');
+
+                    return (
+                      <View
+                        key={key}
+                        style={[styles.resultCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                      >
+                        <View style={styles.resultImageWrap}>
+                          <ImageBackground
+                            source={{ uri: item.image_url || FALLBACK_EVENT_IMAGE }}
+                            style={styles.resultImage}
+                            imageStyle={styles.resultImageStyle}
+                            resizeMode="cover"
+                          >
+                            <View style={styles.resultImageOverlay} />
+                            <View style={styles.resultImageInner}>
+                              <Text style={styles.resultTag}>{item.category || t('explore.suggestion.event')}</Text>
+                            </View>
+                            <View style={[styles.resultImageBase, { backgroundColor: 'rgba(34, 211, 238, 0.18)' }]}>
+                              <Text style={{ color: '#001018', fontWeight: '900', fontSize: 11 }}>{t('explore.suggestion.event')}</Text>
+                            </View>
+                          </ImageBackground>
+                        </View>
+
+                        <View style={styles.resultBody}>
+                          <Text style={[styles.resultTitle, { color: colors.title }]} numberOfLines={2}>
+                            {item.title}
                           </Text>
-                          {typeof distanceMeters === 'number' ? (
-                            <Text style={[styles.resultMeta, { color: colors.muted }]}>
-                              {t('explore.meta.distanceWithBullet', { distance: formatDistance(distanceMeters) })}
-                            </Text>
+                          {creatorId ? (
+                            <Pressable
+                              onPress={() => router.push(`/user/${creatorId}` as any)}
+                              style={({ pressed }) => [styles.eventAuthorRow, pressed ? { opacity: 0.82 } : null]}
+                              accessibilityRole="button"
+                              accessibilityLabel={t('home.openProfile')}
+                            >
+                              {creatorPreview?.avatarUrl ? (
+                                <Image source={{ uri: creatorPreview.avatarUrl }} style={styles.eventAuthorAvatar} />
+                              ) : (
+                                <View style={[styles.eventAuthorAvatarFallback, { borderColor: colors.border }]}>
+                                  <Feather name="user" size={12} color={ExploreEaseColors.primary} />
+                                </View>
+                              )}
+                              <Text style={[styles.eventAuthorName, { color: colors.muted }]} numberOfLines={1}>
+                                {creatorName}
+                              </Text>
+                            </Pressable>
                           ) : null}
-                          <Pressable onPress={() => onOpenEvent(item)} style={styles.viewBtn} accessibilityRole="button">
-                            <Text style={styles.viewBtnText}>{t('common.view')}</Text>
-                          </Pressable>
+                          <Text style={[styles.resultMeta, { color: colors.muted }]} numberOfLines={1}>
+                            {item.location || t('common.unknownLocation')}
+                          </Text>
+                          <Text style={[styles.resultMeta, { color: colors.muted }]} numberOfLines={1}>
+                            {formatDateTimeText(item.start_time)}
+                          </Text>
+                          <View style={styles.resultBottomRow}>
+                            <Text style={[styles.resultPrice, { color: ExploreEaseColors.primary }]}>{formatEventPriceText(item.price)}</Text>
+                            <View style={styles.inlineMetaRow}>
+                              <Text style={[styles.resultMeta, { color: colors.muted }]}>
+                                {getEventStatusLabel(item.status)}
+                              </Text>
+                              {typeof distanceMeters === 'number' ? (
+                                <Text style={[styles.resultMeta, { color: colors.muted }]}>
+                                  {t('explore.meta.distanceWithBullet', { distance: formatDistance(distanceMeters) })}
+                                </Text>
+                              ) : null}
+                              <Pressable onPress={() => onOpenEvent(item)} style={styles.viewBtn} accessibilityRole="button">
+                                <Text style={styles.viewBtnText}>{t('common.view')}</Text>
+                              </Pressable>
+                            </View>
+                          </View>
                         </View>
                       </View>
-                    </View>
-                  </View>
-                );
-              })
-            )}
-
-            {loadingMore ? (
-              <View style={{ paddingVertical: 12, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <ActivityIndicator color={ExploreEaseColors.primary} />
-                <Text style={[styles.resultMeta, { color: colors.muted }]}>{t('explore.loadingMore')}</Text>
-              </View>
+                    );
+                  })
+                )}
+              </>
             ) : null}
 
-            {!loadingMore && hasLoadedInitialRef.current && !hasMoreAttractions && !hasMoreEvents ? (
+            {!loadingMore && hasLoadedInitialRef.current && !hasMore ? (
               <Text style={[styles.emptyText, { color: colors.muted }]}>{t('explore.endOfResults')}</Text>
             ) : null}
           </>
@@ -1232,14 +1966,28 @@ export default function ExploreScreen() {
       type FilterSectionProps = {
         label: string;
         color: string;
+        horizontal?: boolean;
         children: React.ReactNode;
       };
 
-      function FilterSection({ label, color, children }: FilterSectionProps) {
+      function FilterSection({ label, color, horizontal = false, children }: FilterSectionProps) {
         return (
           <View style={{ marginTop: 2 }}>
             <Text style={{ color, fontSize: 12, fontWeight: '800', marginBottom: 8 }}>{label}</Text>
-            <View style={styles.chipRow}>{children}</View>
+            {horizontal ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                directionalLockEnabled
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.chipRowHorizontal}
+              >
+                {children}
+              </ScrollView>
+            ) : (
+              <View style={styles.chipRow}>{children}</View>
+            )}
           </View>
         );
       }
@@ -1313,6 +2061,35 @@ export default function ExploreScreen() {
         },
         label: {
           fontSize: 13,
+          fontWeight: '800',
+        },
+        smartSearchLanguageRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        },
+        smartSearchLanguageLabel: {
+          flex: 1,
+          fontSize: 11,
+          fontWeight: '700',
+        },
+        smartSearchLanguagePills: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+        },
+        smartSearchLanguagePill: {
+          borderRadius: 999,
+          paddingHorizontal: 10,
+          paddingVertical: 5,
+          backgroundColor: 'rgba(148,163,184,0.18)',
+        },
+        smartSearchLanguagePillActive: {
+          backgroundColor: ExploreEaseColors.primary,
+        },
+        smartSearchLanguagePillText: {
+          fontSize: 11,
           fontWeight: '800',
         },
         searchWrap: {
@@ -1407,6 +2184,120 @@ export default function ExploreScreen() {
           lineHeight: 16,
           paddingHorizontal: 2,
         },
+        personalizedHeaderRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        },
+        personalizedStateWrap: {
+          gap: 8,
+        },
+        personalizedSkeletonRow: {
+          flexDirection: 'row',
+          gap: 10,
+        },
+        personalizedSkeletonCard: {
+          width: 210,
+          borderWidth: 1,
+          borderRadius: 12,
+          padding: 10,
+          gap: 8,
+        },
+        personalizedSkeletonImage: {
+          height: 88,
+          borderRadius: 10,
+        },
+        personalizedSkeletonLine: {
+          width: '76%',
+          height: 10,
+          borderRadius: 999,
+        },
+        personalizedSkeletonLineShort: {
+          width: '46%',
+          height: 10,
+          borderRadius: 999,
+        },
+        personalizedList: {
+          paddingVertical: 2,
+          paddingRight: 2,
+        },
+        personalizedCard: {
+          width: 232,
+          borderWidth: 1,
+          borderRadius: 14,
+          overflow: 'hidden',
+        },
+        personalizedImage: {
+          height: 112,
+          justifyContent: 'space-between',
+        },
+        personalizedImageStyle: {
+          width: '100%',
+          height: '100%',
+        },
+        personalizedImageOverlay: {
+          ...StyleSheet.absoluteFillObject,
+          backgroundColor: 'rgba(0,0,0,0.18)',
+        },
+        personalizedImageInner: {
+          padding: 10,
+        },
+        personalizedTag: {
+          alignSelf: 'flex-start',
+          backgroundColor: ExploreEaseColors.primary,
+          color: '#001018',
+          fontSize: 10,
+          fontWeight: '900',
+          paddingHorizontal: 9,
+          paddingVertical: 4,
+          borderRadius: 999,
+          overflow: 'hidden',
+        },
+        personalizedBody: {
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          gap: 4,
+        },
+        personalizedTitle: {
+          fontSize: 14,
+          lineHeight: 19,
+          fontWeight: '900',
+        },
+        personalizedMeta: {
+          fontSize: 12,
+          fontWeight: '600',
+        },
+        personalizedReasonBadge: {
+          marginTop: 2,
+          borderWidth: 1,
+          borderRadius: 8,
+          paddingHorizontal: 8,
+          paddingVertical: 5,
+        },
+        personalizedReasonText: {
+          fontSize: 11,
+          fontWeight: '700',
+          lineHeight: 15,
+        },
+        personalizedBottomRow: {
+          marginTop: 2,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        },
+        personalizedPrice: {
+          fontSize: 13,
+          fontWeight: '900',
+        },
+        personalizedFallbackWrap: {
+          gap: 8,
+        },
+        personalizedFallbackTitle: {
+          fontSize: 13,
+          fontWeight: '800',
+        },
         actionsRow: {
           flexDirection: 'row',
           gap: 8,
@@ -1454,6 +2345,11 @@ export default function ExploreScreen() {
           flexWrap: 'wrap',
           gap: 8,
         },
+        chipRowHorizontal: {
+          flexDirection: 'row',
+          gap: 8,
+          paddingRight: 2,
+        },
         chip: {
           borderWidth: 1,
           borderRadius: 999,
@@ -1483,6 +2379,12 @@ export default function ExploreScreen() {
           justifyContent: 'center',
           paddingVertical: 30,
           gap: 10,
+        },
+        listFooterLoading: {
+          paddingVertical: 12,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
         },
         stateText: {
           fontSize: 13,
@@ -1569,6 +2471,32 @@ export default function ExploreScreen() {
           fontSize: 15,
           lineHeight: 20,
           fontWeight: '900',
+        },
+        eventAuthorRow: {
+          marginTop: 2,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 7,
+          alignSelf: 'flex-start',
+          maxWidth: '100%',
+        },
+        eventAuthorAvatar: {
+          width: 22,
+          height: 22,
+          borderRadius: 11,
+        },
+        eventAuthorAvatarFallback: {
+          width: 22,
+          height: 22,
+          borderRadius: 11,
+          borderWidth: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        eventAuthorName: {
+          fontSize: 12,
+          fontWeight: '700',
+          flexShrink: 1,
         },
         resultMeta: {
           fontSize: 12,

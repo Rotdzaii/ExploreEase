@@ -13,7 +13,7 @@ import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 type Trip = {
   id: string;
@@ -71,6 +71,21 @@ const mapTripRowToTrip = (row: TripRow, locale: string): Trip => {
     daysCount,
     cover: row.cover ?? FALLBACK_COVER,
   };
+};
+
+const releaseOverlayTriggerFocus = () => {
+  Keyboard.dismiss();
+
+  if (Platform.OS !== 'web') return;
+
+  try {
+    const activeElement = (globalThis as any)?.document?.activeElement as { blur?: () => void } | null | undefined;
+    if (activeElement && typeof activeElement.blur === 'function') {
+      activeElement.blur();
+    }
+  } catch {
+    // Ignore focus release failures on unsupported environments.
+  }
 };
 
 export default function TripsScreen() {
@@ -316,7 +331,10 @@ export default function TripsScreen() {
             </Text>
 
             <Pressable
-              onPress={() => setIsShareOpen(true)}
+              onPress={() => {
+                releaseOverlayTriggerFocus();
+                setIsShareOpen(true);
+              }}
               style={({ pressed, hovered }) => [
                 styles.headerIconBtn,
                 hovered ? { opacity: 0.95 } : null,
@@ -430,7 +448,10 @@ export default function TripsScreen() {
               <TripActionBar
                 optimized={optimized}
                 onOptimizeRoute={toggleOptimize}
-                onShare={() => setIsShareOpen(true)}
+                onShare={() => {
+                  releaseOverlayTriggerFocus();
+                  setIsShareOpen(true);
+                }}
               />
             </View>
           </ScrollView>

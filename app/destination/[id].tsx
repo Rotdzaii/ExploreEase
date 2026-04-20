@@ -10,6 +10,7 @@ import {
     Alert,
     FlatList,
     ImageBackground,
+    Keyboard,
     Modal,
     Platform,
     Pressable,
@@ -178,6 +179,21 @@ const openGoogleMaps = async (coords: { latitude: number; longitude: number }) =
   await Linking.openURL(url);
 };
 
+const releaseOverlayTriggerFocus = () => {
+  Keyboard.dismiss();
+
+  if (Platform.OS !== 'web') return;
+
+  try {
+    const activeElement = (globalThis as any)?.document?.activeElement as { blur?: () => void } | null | undefined;
+    if (activeElement && typeof activeElement.blur === 'function') {
+      activeElement.blur();
+    }
+  } catch {
+    // Ignore focus release failures on unsupported environments.
+  }
+};
+
 export default function DestinationDetailScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const { isDark } = useTheme();
@@ -222,6 +238,7 @@ export default function DestinationDetailScreen() {
     : 'https://images.unsplash.com/photo-1500375592092-40eb2168fd21';
 
   const headerHeight = Math.round(clamp(screenHeight * 0.42, s(260), s(360)));
+  const isCompactFooterLayout = screenWidth <= 390;
 
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
@@ -406,6 +423,7 @@ export default function DestinationDetailScreen() {
   }, [t]);
 
   const openAddToTrip = useCallback(() => {
+    releaseOverlayTriggerFocus();
     setSelectedTripRow(null);
     setSelectedTripDay(1);
     setIsAddToTripOpen(true);
@@ -573,6 +591,7 @@ export default function DestinationDetailScreen() {
 
       // Fetch trips first, then branch.
       const rows = await loadTrips();
+      releaseOverlayTriggerFocus();
 
       if ((rows ?? []).length > 0) {
         if (Platform.OS === 'web') {
@@ -966,12 +985,13 @@ export default function DestinationDetailScreen() {
   }, [addNotification, currentUserId, helpfulPendingId, promptLogin, t]);
 
   const openReportModal = useCallback((reviewId: string) => {
+    releaseOverlayTriggerFocus();
     setReportReviewId(reviewId);
     setReportReason('');
     setReportModalVisible(true);
   }, []);
 
-  const submitReviewReport = useCallback(async () => {
+  const handleReportReview = useCallback(async () => {
     if (!reportReviewId) return;
 
     if (!currentUserId) {
@@ -1006,7 +1026,7 @@ export default function DestinationDetailScreen() {
       setReportReason('');
       setReportReviewId(null);
     } catch (error: any) {
-      console.warn('submitReviewReport failed:', error);
+      console.warn('handleReportReview(destination) failed:', error);
       const reason = String(error?.message ?? '').trim() || t('review.error.genericTryAgain');
       addNotification({
         message: t('review.error.reportFailed', { reason }),
@@ -1379,6 +1399,12 @@ export default function DestinationDetailScreen() {
       const reviewImageUrls = toReviewImageUrls(item.review_image_urls);
       const replyDraft = replyDraftByReview[reviewId] ?? '';
       const isReplyLoading = submittingReplyId === reviewId;
+      const reviewerId = String(item.user_id ?? '').trim();
+      const onPressReviewer = reviewerId
+        ? () => {
+            router.push(`/user/${reviewerId}` as any);
+          }
+        : undefined;
 
       return (
         <ReviewCard
@@ -1406,6 +1432,7 @@ export default function DestinationDetailScreen() {
           onSubmitReply={() => void submitReplyToReview(reviewId)}
           onToggleHelpful={() => void onToggleHelpfulReview(item)}
           onReport={() => openReportModal(reviewId)}
+          onPressReviewer={onPressReviewer}
         />
       );
     },
@@ -2220,7 +2247,7 @@ export default function DestinationDetailScreen() {
           submitting={submittingReport}
           onClose={() => setReportModalVisible(false)}
           onChangeReason={setReportReason}
-          onSubmit={() => void submitReviewReport()}
+          onSubmit={() => void handleReportReview()}
         />
 
         <FlatList
@@ -2274,13 +2301,13 @@ export default function DestinationDetailScreen() {
                   paddingTop: s(24),
                   paddingHorizontal: s(24),
                   paddingBottom: s(40) + insets.bottom,
-                  flexDirection: 'row',
-                  alignItems: 'center',
+                  flexDirection: isCompactFooterLayout ? 'column' : 'row',
+                  alignItems: isCompactFooterLayout ? 'stretch' : 'center',
                   justifyContent: 'space-between',
                   gap: s(14),
                 }}
               >
-                <View style={{ flex: 1, minWidth: s(120) }}>
+                <View style={{ flex: isCompactFooterLayout ? 0 : 1, minWidth: isCompactFooterLayout ? 0 : s(120) }}>
                   <Text style={{ color: footerMuted, fontWeight: '900', fontSize: s(12) }}>{t('destination.detail.priceLabel')}</Text>
                   <Text
                     style={{ color: footerFg, fontWeight: '900', fontSize: s(18), marginTop: s(4) }}
@@ -2290,7 +2317,15 @@ export default function DestinationDetailScreen() {
                   </Text>
                 </View>
 
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: s(10) }}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: isCompactFooterLayout ? 'space-between' : 'flex-end',
+                    gap: s(10),
+                    flexWrap: 'wrap',
+                  }}
+                >
                   <Pressable
                     onPress={handleAddToPlan}
                     style={({ pressed, hovered }) => [
@@ -2304,6 +2339,9 @@ export default function DestinationDetailScreen() {
                         flexDirection: 'row',
                         alignItems: 'center',
                         gap: s(8),
+                        flexShrink: 1,
+                        flexGrow: isCompactFooterLayout ? 1 : 0,
+                        minWidth: isCompactFooterLayout ? 0 : s(130),
                       },
                       (Platform.OS === 'web' && hovered) ? { opacity: 0.96 } : null,
                       pressed ? { opacity: 0.86, transform: [{ scale: 0.95 }] } : null,
@@ -2312,7 +2350,7 @@ export default function DestinationDetailScreen() {
                     accessibilityLabel={t('destination.trip.addToPlanTitle')}
                   >
                     <MaterialCommunityIcons name="playlist-plus" size={s(18)} color={ExploreEaseColors.primary} />
-                    <Text style={{ color: footerFg, fontWeight: '900', fontSize: s(13) }} numberOfLines={1}>
+                    <Text style={{ color: footerFg, fontWeight: '900', fontSize: s(13), flexShrink: 1 }} numberOfLines={1}>
                       {t('destination.trip.addToPlanTitle')}
                     </Text>
                   </Pressable>
@@ -2329,6 +2367,9 @@ export default function DestinationDetailScreen() {
                       styles.directionsBtn,
                       {
                         borderRadius: 999,
+                        flexShrink: 1,
+                        flexGrow: isCompactFooterLayout ? 1 : 0,
+                        minWidth: isCompactFooterLayout ? 0 : s(148),
                       },
                       (Platform.OS === 'web' && hovered) ? { opacity: 0.98 } : null,
                       pressed ? { opacity: 0.9, transform: [{ scale: 0.95 }] } : null,
@@ -2341,7 +2382,7 @@ export default function DestinationDetailScreen() {
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                       style={{
-                        paddingHorizontal: s(40),
+                        paddingHorizontal: isCompactFooterLayout ? s(16) : s(24),
                         paddingVertical: s(16),
                         borderRadius: 999,
                         justifyContent: 'center',
@@ -2350,7 +2391,7 @@ export default function DestinationDetailScreen() {
                     >
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: s(8) }}>
                         <MaterialCommunityIcons name="map" size={s(18)} color={ExploreEaseColors.background} />
-                        <Text style={{ color: ExploreEaseColors.background, fontWeight: '900', fontSize: s(15) }}>
+                        <Text style={{ color: ExploreEaseColors.background, fontWeight: '900', fontSize: s(isCompactFooterLayout ? 13 : 15) }} numberOfLines={1}>
                           {t('destination.directions.title')}
                         </Text>
                       </View>

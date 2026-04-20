@@ -12,7 +12,14 @@ const dist2 = (a: ItineraryItemRow, b: ItineraryItemRow) => {
   return dx * dx + dy * dy;
 };
 
-// Simulated optimization: nearest-neighbor on coords, fallback to time/name.
+// Route strategy used here:
+// 1) This is a greedy nearest-neighbor heuristic (an approximate TSP approach),
+//    not an exact global shortest-path solver.
+// 2) It starts at the earliest item, then repeatedly chooses the closest next stop
+//    by squared Euclidean distance on latitude/longitude.
+// 3) Items without coordinates cannot be distance-ranked, so they are appended later
+//    using a stable sort by sort_order, then start_time, then name.
+// Complexity: O(n^2) for coordinate-aware stops because each step scans remaining nodes.
 export function optimizeDayRoute(items: ItineraryItemRow[]): ItineraryItemRow[] {
   const input = [...(items ?? [])];
   if (input.length <= 2) return input;
@@ -46,6 +53,7 @@ export function optimizeDayRoute(items: ItineraryItemRow[]): ItineraryItemRow[] 
     let bestIdx = 0;
     let bestDist = Number.POSITIVE_INFINITY;
 
+    // Greedy step: choose nearest unvisited stop from current position.
     for (let i = 0; i < remaining.length; i++) {
       const d = dist2(current, remaining[i]);
       if (d < bestDist) {

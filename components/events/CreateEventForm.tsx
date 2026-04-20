@@ -2,8 +2,9 @@ import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import { Feather } from '@expo/vector-icons';
-import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 export type EventFormData = {
   title: string;
@@ -14,7 +15,9 @@ export type EventFormData = {
   endDate: string;
   endTime: string;
   price: string;
-  imageUrl: string;
+  imageUri: string;
+  imageFileName: string;
+  imageMimeType: string;
   description: string;
 };
 
@@ -61,7 +64,9 @@ export function CreateEventForm({ onSubmit, onCancel }: CreateEventFormProps) {
     endDate: '',
     endTime: '',
     price: '0',
-    imageUrl: '',
+    imageUri: '',
+    imageFileName: '',
+    imageMimeType: '',
     description: '',
   });
   const [errors, setErrors] = useState<Partial<Record<keyof EventFormData, string>>>({});
@@ -100,12 +105,12 @@ export function CreateEventForm({ onSubmit, onCancel }: CreateEventFormProps) {
     [t]
   );
 
-  const setField = <K extends keyof EventFormData>(key: K, value: EventFormData[K]) => {
+  function setField<K extends keyof EventFormData>(key: K, value: EventFormData[K]) {
     setFormData((prev) => ({ ...prev, [key]: value }));
     if (errors[key]) {
       setErrors((prev) => ({ ...prev, [key]: undefined }));
     }
-  };
+  }
 
   const resetForm = () => {
     setFormData({
@@ -117,11 +122,52 @@ export function CreateEventForm({ onSubmit, onCancel }: CreateEventFormProps) {
       endDate: '',
       endTime: '',
       price: '0',
-      imageUrl: '',
+      imageUri: '',
+      imageFileName: '',
+      imageMimeType: '',
       description: '',
     });
     setErrors({});
   };
+
+  const onPickImage = useCallback(async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert(t('common.notification'), t('events.form.imagePermissionDenied'));
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.85,
+      allowsMultipleSelection: false,
+    });
+
+    if (result.canceled || !result.assets?.length) return;
+
+    const asset = result.assets[0];
+    if (!asset?.uri) {
+      Alert.alert(t('common.notification'), t('events.form.imagePickFailed'));
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      imageUri: asset.uri,
+      imageFileName: asset.fileName ?? '',
+      imageMimeType: asset.mimeType ?? '',
+    }));
+  }, [t]);
+
+  const onRemoveImage = useCallback(() => {
+    setFormData((prev) => ({
+      ...prev,
+      imageUri: '',
+      imageFileName: '',
+      imageMimeType: '',
+    }));
+  }, []);
 
   const validateForm = (): boolean => {
     const nextErrors: Partial<Record<keyof EventFormData, string>> = {};
@@ -144,6 +190,7 @@ export function CreateEventForm({ onSubmit, onCancel }: CreateEventFormProps) {
     const end = toDateTime(formData.endDate, formData.endTime);
     if (start && end && end <= start) {
       nextErrors.endTime = t('events.form.validation.endAfterStart');
+      Alert.alert(t('events.form.error.invalidDateTimeTitle'), 'Ngày kết thúc phải sau ngày bắt đầu');
     }
 
     setErrors(nextErrors);
@@ -165,7 +212,7 @@ export function CreateEventForm({ onSubmit, onCancel }: CreateEventFormProps) {
     }
   };
 
-  const imageSourceUri = formData.imageUrl.trim() || FALLBACK_EVENT_IMAGE;
+  const imageSourceUri = formData.imageUri.trim() || FALLBACK_EVENT_IMAGE;
 
   return (
     <View style={[styles.safe, { backgroundColor: colors.background }]}> 
@@ -178,32 +225,60 @@ export function CreateEventForm({ onSubmit, onCancel }: CreateEventFormProps) {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-          <Text style={[styles.label, { color: colors.title }]}>{t('events.form.imageUrl')}</Text>
+          <Text style={[styles.label, { color: colors.title }]}>{t('events.form.imageTitle')}</Text>
           <View style={styles.imagePreviewWrap}>
             <Image source={{ uri: imageSourceUri }} style={styles.imagePreview} resizeMode="cover" />
-            {!!formData.imageUrl.trim() ? (
+            {!!formData.imageUri.trim() ? (
               <Pressable
-                onPress={() => setField('imageUrl', '')}
+                onPress={onRemoveImage}
                 style={({ pressed }) => [styles.removeImageBtn, pressed ? { opacity: 0.82 } : null]}
                 accessibilityRole="button"
+                accessibilityLabel={t('events.form.removeImage')}
               >
                 <Feather name="x" size={16} color="#ffffff" />
               </Pressable>
             ) : null}
           </View>
 
-          <TextInput
-            value={formData.imageUrl}
-            onChangeText={(value) => setField('imageUrl', value)}
-            placeholder={t('events.form.imageUrlPlaceholder')}
-            placeholderTextColor={colors.muted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[
-              styles.input,
-              { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.inputText },
-            ]}
-          />
+          <View style={styles.imageActionRow}>
+            <Pressable
+              onPress={() => void onPickImage()}
+              style={({ pressed }) => [
+                styles.imageActionBtn,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: colors.inputBg,
+                },
+                pressed ? { opacity: 0.84 } : null,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={t(formData.imageUri ? 'events.form.changeImage' : 'events.form.pickImage')}
+            >
+              <Feather name="image" size={15} color={ExploreEaseColors.primary} />
+              <Text style={[styles.imageActionBtnText, { color: colors.body }]}>
+                {t(formData.imageUri ? 'events.form.changeImage' : 'events.form.pickImage')}
+              </Text>
+            </Pressable>
+
+            {!!formData.imageUri ? (
+              <Pressable
+                onPress={onRemoveImage}
+                style={({ pressed }) => [
+                  styles.imageActionBtn,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBg,
+                  },
+                  pressed ? { opacity: 0.84 } : null,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={t('events.form.removeImage')}
+              >
+                <Feather name="trash-2" size={15} color={colors.error} />
+                <Text style={[styles.imageActionBtnText, { color: colors.body }]}>{t('events.form.removeImage')}</Text>
+              </Pressable>
+            ) : null}
+          </View>
 
           <Text style={[styles.label, { color: colors.title }]}>{t('events.form.title')}</Text>
           <TextInput
@@ -482,6 +557,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#ef4444',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  imageActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 2,
+  },
+  imageActionBtn: {
+    minHeight: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  imageActionBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
   },
   input: {
     borderWidth: 1,

@@ -53,6 +53,12 @@ export type PersonalizedRecommendationsOptions = {
 
 type KnownTravelStyle = 'solo' | 'family' | 'group';
 
+type WeatherContextSnapshot = {
+  sourceLocation: string;
+  isWetWeather: boolean;
+  localHour: number | null;
+};
+
 const INTEREST_KEYWORDS: Record<string, string[]> = {
   food: ['restaurant', 'street food', 'cafe', 'coffee', 'dining', 'night market', 'bakery'],
   culture: ['museum', 'art', 'gallery', 'temple', 'cultural', 'heritage', 'craft'],
@@ -75,9 +81,148 @@ const TIME_OF_DAY_KEYWORDS: Record<TimeOfDay, string[]> = {
   night: ['nightlife', 'bar', 'club', 'late night', 'cocktail', 'dj'],
 };
 
+const OPEN_WEATHER_API_KEY = String(process.env.EXPO_PUBLIC_OPENWEATHERMAP_API_KEY ?? '').trim();
+const WEATHER_LOOKUP_CACHE_TTL_MS = 15 * 60 * 1000;
+
+const weatherLookupCache = new Map<string, { expiresAt: number; value: WeatherContextSnapshot | null }>();
+
+const OUTDOOR_ACTIVITY_KEYWORDS = [
+  'outdoor',
+  'outside',
+  'open air',
+  'park',
+  'garden',
+  'beach',
+  'lake',
+  'mountain',
+  'waterfall',
+  'trail',
+  'hiking',
+  'trek',
+  'camping',
+  'picnic',
+  'zoo',
+  'safari',
+  'ngoai troi',
+  'công viên',
+  'cong vien',
+  'bãi biển',
+  'bai bien',
+  'hồ',
+  'ho ',
+  'núi',
+  'nui',
+  'thác',
+  'thac',
+  'đường mòn',
+  'duong mon',
+  'cắm trại',
+  'cam trai',
+  'dã ngoại',
+  'da ngoai',
+  'vườn',
+  'vuon',
+];
+
+const INDOOR_ACTIVITY_KEYWORDS = [
+  'indoor',
+  'inside',
+  'museum',
+  'gallery',
+  'mall',
+  'cinema',
+  'theater',
+  'cafe',
+  'coffee',
+  'restaurant',
+  'spa',
+  'karaoke',
+  'bowling',
+  'aquarium',
+  'trong nha',
+  'trong nhà',
+  'bảo tàng',
+  'bao tang',
+  'trung tâm thương mại',
+  'trung tam thuong mai',
+  'rạp phim',
+  'rap phim',
+  'nhà hàng',
+  'nha hang',
+  'quán cà phê',
+  'quan ca phe',
+  'nhà hát',
+  'nha hat',
+];
+
+const NIGHT_FRIENDLY_KEYWORDS = [
+  'night market',
+  'nightlife',
+  'bar',
+  'club',
+  'pub',
+  'cocktail',
+  'dj',
+  'rooftop',
+  'live music',
+  'chợ đêm',
+  'cho dem',
+  'phố đi bộ',
+  'pho di bo',
+  'khuya',
+  'đêm',
+  'dem',
+  'karaoke',
+];
+
+const DAYTIME_ONLY_KEYWORDS = [
+  'park',
+  'garden',
+  'beach',
+  'lake',
+  'mountain',
+  'waterfall',
+  'trail',
+  'hiking',
+  'trek',
+  'camping',
+  'picnic',
+  'zoo',
+  'safari',
+  'sunrise',
+  'ngoai troi',
+  'công viên',
+  'cong vien',
+  'bãi biển',
+  'bai bien',
+  'núi',
+  'nui',
+  'thác',
+  'thac',
+  'đường mòn',
+  'duong mon',
+  'cắm trại',
+  'cam trai',
+  'vườn',
+  'vuon',
+];
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const normalize = (value: string) => value.trim().toLowerCase();
+
+const includesAnyKeyword = (searchText: string, keywords: string[]) => {
+  const text = normalize(searchText);
+  if (!text) return false;
+
+  for (const keyword of keywords) {
+    const token = normalize(keyword);
+    if (!token) continue;
+    if (text.includes(token)) return true;
+  }
+
+  return false;
+};
 
 const normalizeTokens = (value: string) =>
   value
@@ -202,6 +347,158 @@ const dedupeById = <T extends { id: string | number }>(rows: T[]): T[] => {
     if (!bucket.has(key)) bucket.set(key, row);
   }
   return Array.from(bucket.values());
+};
+
+const resolveWeatherLookupCandidates = (location: string) => {
+  const raw = String(location ?? '').trim();
+  if (!raw) return [] as string[];
+
+  const normalized = raw.replace(/\s+/g, ' ').trim();
+  const segments = normalized
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const candidates: string[] = [normalized];
+
+  if (segments.length >= 2) {
+    candidates.push(`${segments[segments.length - 2]}, ${segments[segments.length - 1]}`);
+  }
+
+  if (segments.length >= 1) {
+    candidates.push(segments[segments.length - 1]);
+  }
+
+  return unique(candidates);
+};
+
+const computeHourFromTimezoneOffset = (timezoneOffsetSeconds: number | null): number | null => {
+  if (typeof timezoneOffsetSeconds !== 'number' || !Number.isFinite(timezoneOffsetSeconds)) return null;
+
+  const nowUtcMs = Date.now() + new Date().getTimezoneOffset() * 60 * 1000;
+  const localMs = nowUtcMs + timezoneOffsetSeconds * 1000;
+  const localDate = new Date(localMs);
+  const hour = localDate.getHours();
+  return Number.isFinite(hour) ? hour : null;
+};
+
+const isWetWeatherByCode = (weatherCode: number | null, weatherMain: string | null) => {
+  if (typeof weatherCode === 'number' && Number.isFinite(weatherCode)) {
+    if (weatherCode >= 200 && weatherCode < 700) return true;
+  }
+
+  const main = normalize(weatherMain ?? '');
+  return main.includes('rain') || main.includes('drizzle') || main.includes('thunderstorm') || main.includes('snow');
+};
+
+const fetchWeatherContextByLocation = async (location: string): Promise<WeatherContextSnapshot | null> => {
+  const trimmed = String(location ?? '').trim();
+  if (!trimmed || !OPEN_WEATHER_API_KEY) return null;
+
+  const cacheKey = normalize(trimmed);
+  const now = Date.now();
+  const cached = weatherLookupCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  const candidates = resolveWeatherLookupCandidates(trimmed);
+  for (const candidate of candidates) {
+    try {
+      const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(candidate)}&appid=${encodeURIComponent(OPEN_WEATHER_API_KEY)}&units=metric`;
+      const response = await fetch(url);
+      if (!response.ok) continue;
+
+      const payload = (await response.json()) as {
+        weather?: { id?: number; main?: string }[];
+        timezone?: number;
+      };
+
+      const weatherCodeRaw = payload.weather?.[0]?.id;
+      const weatherCode = typeof weatherCodeRaw === 'number' && Number.isFinite(weatherCodeRaw) ? weatherCodeRaw : null;
+      const weatherMainRaw = payload.weather?.[0]?.main;
+      const weatherMain = typeof weatherMainRaw === 'string' ? weatherMainRaw : null;
+      const timezoneRaw = payload.timezone;
+      const timezone = typeof timezoneRaw === 'number' && Number.isFinite(timezoneRaw) ? timezoneRaw : null;
+
+      const resolved = {
+        sourceLocation: candidate,
+        isWetWeather: isWetWeatherByCode(weatherCode, weatherMain),
+        localHour: computeHourFromTimezoneOffset(timezone),
+      } as WeatherContextSnapshot;
+
+      weatherLookupCache.set(cacheKey, {
+        value: resolved,
+        expiresAt: now + WEATHER_LOOKUP_CACHE_TTL_MS,
+      });
+
+      return resolved;
+    } catch {
+      // Ignore network/weather provider errors and continue with fallback candidates.
+    }
+  }
+
+  weatherLookupCache.set(cacheKey, {
+    value: null,
+    expiresAt: now + 60 * 1000,
+  });
+
+  return null;
+};
+
+const resolveRecommendationWeatherContext = async (
+  options: PersonalizedRecommendationsOptions,
+  destinationPool: DestinationDiscoveryRow[],
+  eventPool: EventDiscoveryRow[]
+): Promise<WeatherContextSnapshot | null> => {
+  if (!OPEN_WEATHER_API_KEY) return null;
+
+  const locationCandidates = [
+    options.contextItem?.location ?? '',
+    destinationPool.find((row) => String(row.location ?? '').trim())?.location ?? '',
+    eventPool.find((row) => String(row.location ?? '').trim())?.location ?? '',
+  ]
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean);
+
+  for (const location of unique(locationCandidates)) {
+    const weatherContext = await fetchWeatherContextByLocation(location);
+    if (weatherContext) return weatherContext;
+  }
+
+  return null;
+};
+
+const isLateNightHour = (hour: number | null, timeOfDay: TimeOfDay) => {
+  if (typeof hour === 'number' && Number.isFinite(hour)) {
+    return hour >= 22 || hour < 5;
+  }
+
+  return timeOfDay === 'night';
+};
+
+const shouldExcludeSuggestionByWeatherAndTime = (input: {
+  searchText: string;
+  weatherContext: WeatherContextSnapshot | null;
+  timeOfDay: TimeOfDay;
+}) => {
+  const text = normalize(input.searchText);
+  if (!text) return false;
+
+  const isOutdoor = includesAnyKeyword(text, OUTDOOR_ACTIVITY_KEYWORDS);
+  const isIndoor = includesAnyKeyword(text, INDOOR_ACTIVITY_KEYWORDS);
+  const isNightFriendly = includesAnyKeyword(text, NIGHT_FRIENDLY_KEYWORDS);
+  const isDaytimeOnly = includesAnyKeyword(text, DAYTIME_ONLY_KEYWORDS);
+
+  if (input.weatherContext?.isWetWeather && isOutdoor && !isIndoor) {
+    return true;
+  }
+
+  if (isLateNightHour(input.weatherContext?.localHour ?? null, input.timeOfDay) && isDaytimeOnly && !isNightFriendly) {
+    return true;
+  }
+
+  return false;
 };
 
 export const inferTimeOfDay = (date: Date = new Date()): TimeOfDay => {
@@ -508,7 +805,25 @@ export const recommendationService = {
 
     const eventPool = dedupeById([...baseEvents, ...hintEvents] as EventDiscoveryRow[]);
 
-    const destinationSuggestions = destinationPool
+    const weatherContext = await resolveRecommendationWeatherContext(options, destinationPool, eventPool);
+
+    const weatherAwareDestinationPool = destinationPool.filter((row) =>
+      !shouldExcludeSuggestionByWeatherAndTime({
+        searchText: destinationSearchText(row),
+        weatherContext,
+        timeOfDay,
+      })
+    );
+
+    const weatherAwareEventPool = eventPool.filter((row) =>
+      !shouldExcludeSuggestionByWeatherAndTime({
+        searchText: eventSearchText(row),
+        weatherContext,
+        timeOfDay,
+      })
+    );
+
+    const destinationSuggestions = weatherAwareDestinationPool
       .filter((row) => !excludedKeys.has(`destination:${String(row.id)}`))
       .map((row) =>
         scoreDestination({
@@ -526,8 +841,8 @@ export const recommendationService = {
       .slice(0, limitDestinations);
 
     const eventSourceRows = options.respectTimeOfDayWindow
-      ? filterEventsByTimeOfDay(eventPool, timeOfDay)
-      : eventPool;
+      ? filterEventsByTimeOfDay(weatherAwareEventPool, timeOfDay)
+      : weatherAwareEventPool;
 
     const eventSuggestions = eventSourceRows
       .filter((row) => !excludedKeys.has(`event:${String(row.id)}`))

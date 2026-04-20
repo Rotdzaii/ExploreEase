@@ -5,9 +5,9 @@ import {
     adminService,
     type AdminAnalyticsCounts,
     type AdminEventRow,
+    type AdminReviewReportRow,
 } from '@/src/services/adminService';
 import { eventService } from '@/src/services/eventService';
-import { reviewService, type ModerationReviewRow } from '@/src/services/reviewService';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { Feather } from '@expo/vector-icons';
 import { router, Stack } from 'expo-router';
@@ -105,9 +105,9 @@ export default function AdminDashboardScreen() {
   const [analytics, setAnalytics] = useState<AdminAnalyticsCounts>(DEFAULT_ANALYTICS);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
-  const [moderationReviews, setModerationReviews] = useState<ModerationReviewRow[]>([]);
-  const [loadingModerationReviews, setLoadingModerationReviews] = useState(false);
-  const [actingOnReviewId, setActingOnReviewId] = useState<string | null>(null);
+  const [moderationReports, setModerationReports] = useState<AdminReviewReportRow[]>([]);
+  const [loadingModerationReports, setLoadingModerationReports] = useState(false);
+  const [actingOnReportId, setActingOnReportId] = useState<string | null>(null);
 
   const colors = useMemo(
     () => ({
@@ -174,18 +174,18 @@ export default function AdminDashboardScreen() {
     }
   }, [hasAccess, notifyError, t]);
 
-  const loadModerationReviews = useCallback(async () => {
+  const loadModerationReports = useCallback(async () => {
     if (!hasAccess) return;
 
-    setLoadingModerationReviews(true);
+    setLoadingModerationReports(true);
     try {
-      const rows = await reviewService.getRecentReviewsForModeration();
-      setModerationReviews(rows);
+      const rows = await adminService.getPendingReviewReports();
+      setModerationReports(rows);
     } catch (error: any) {
-      const reason = String(error?.message ?? t('admin.error.loadReviews'));
+      const reason = String(error?.message ?? t('admin.error.loadReports'));
       notifyError(reason);
     } finally {
-      setLoadingModerationReviews(false);
+      setLoadingModerationReports(false);
     }
   }, [hasAccess, notifyError, t]);
 
@@ -225,9 +225,9 @@ export default function AdminDashboardScreen() {
     if (!hasAccess) return;
 
     void loadEvents();
-    void loadModerationReviews();
+    void loadModerationReports();
     void loadAnalytics();
-  }, [hasAccess, loadEvents, loadModerationReviews, loadAnalytics]);
+  }, [hasAccess, loadEvents, loadModerationReports, loadAnalytics]);
 
   const onApproveEvent = useCallback(
     async (eventId: string) => {
@@ -267,23 +267,58 @@ export default function AdminDashboardScreen() {
     [actingOnEventId, notifyError, notifySuccess, t]
   );
 
-  const onDeleteReview = useCallback(
-    async (review: ModerationReviewRow) => {
-      if (actingOnReviewId) return;
+  const onDismissReport = useCallback(
+    async (report: AdminReviewReportRow) => {
+      if (actingOnReportId) return;
 
-      setActingOnReviewId(review.id);
+      setActingOnReportId(report.id);
       try {
-        await reviewService.deleteReviewAsAdmin(review.id);
-        setModerationReviews((prev) => prev.filter((row) => row.id !== review.id));
+        await adminService.dismissReviewReport(report.id, report.source);
+        setModerationReports((prev) => prev.filter((row) => row.id !== report.id));
+        notifySuccess(t('admin.success.reportDismissed'));
+      } catch (error: any) {
+        const reason = String(error?.message ?? t('admin.error.dismissReport'));
+        notifyError(reason);
+      } finally {
+        setActingOnReportId(null);
+      }
+    },
+    [actingOnReportId, notifyError, notifySuccess, t]
+  );
+
+  const onDeleteReportedReview = useCallback(
+    async (report: AdminReviewReportRow) => {
+      if (actingOnReportId) return;
+
+      const reviewId = String(report.review?.id ?? '').trim();
+      if (!reviewId) {
+        Alert.alert(t('admin.alert.reviewNotFoundTitle'), t('admin.alert.reviewNotFoundMessage'), [
+          { text: t('common.cancel'), style: 'cancel' },
+          {
+            text: t('admin.actions.dismissReport'),
+            onPress: () => {
+              void onDismissReport(report);
+            },
+          },
+        ]);
+        return;
+      }
+
+      setActingOnReportId(report.id);
+      try {
+        await adminService.deleteReviewAndResolveReport(report.id, reviewId, report.source);
+        setModerationReports((prev) =>
+          prev.filter((row) => !(row.source === report.source && row.review_id === report.review_id))
+        );
         notifySuccess(t('admin.success.reviewDeleted'));
       } catch (error: any) {
         const reason = String(error?.message ?? t('admin.error.deleteReview'));
         notifyError(reason);
       } finally {
-        setActingOnReviewId(null);
+        setActingOnReportId(null);
       }
     },
-    [actingOnReviewId, notifyError, notifySuccess, t]
+    [actingOnReportId, notifyError, notifySuccess, onDismissReport, t]
   );
 
   if (checkingAccess) {
@@ -494,16 +529,16 @@ export default function AdminDashboardScreen() {
         {activeTab === 'moderation' ? (
           <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('admin.reviews.sectionTitle')}</Text>
+              <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('admin.reports.sectionTitle')}</Text>
               <Pressable
-                onPress={() => void loadModerationReviews()}
-                disabled={loadingModerationReviews}
+                onPress={() => void loadModerationReports()}
+                disabled={loadingModerationReports}
                 style={({ pressed }) => [
                   styles.refreshBtn,
                   {
                     borderColor: colors.border,
                     backgroundColor: colors.tabIdle,
-                    opacity: loadingModerationReviews ? 0.7 : pressed ? 0.84 : 1,
+                    opacity: loadingModerationReports ? 0.7 : pressed ? 0.84 : 1,
                   },
                 ]}
                 accessibilityRole="button"
@@ -513,46 +548,84 @@ export default function AdminDashboardScreen() {
               </Pressable>
             </View>
 
-            {loadingModerationReviews && moderationReviews.length === 0 ? (
+            {loadingModerationReports && moderationReports.length === 0 ? (
               <View style={styles.stateWrapInner}>
                 <ActivityIndicator color={ExploreEaseColors.primary} />
-                <Text style={[styles.stateText, { color: colors.muted }]}>{t('admin.reviews.loading')}</Text>
+                <Text style={[styles.stateText, { color: colors.muted }]}>{t('admin.reports.loading')}</Text>
               </View>
             ) : null}
 
-            {!loadingModerationReviews && moderationReviews.length === 0 ? (
+            {!loadingModerationReports && moderationReports.length === 0 ? (
               <View style={styles.stateWrapInner}>
-                <Text style={[styles.stateText, { color: colors.muted }]}>{t('admin.reviews.empty')}</Text>
+                <Text style={[styles.stateText, { color: colors.muted }]}>{t('admin.reports.empty')}</Text>
               </View>
             ) : null}
 
-            {moderationReviews.map((review) => (
-              <View key={review.id} style={[styles.itemCard, { borderColor: colors.border, backgroundColor: colors.tabIdle }]}> 
+            {moderationReports.map((report) => (
+              <View key={report.id} style={[styles.itemCard, { borderColor: colors.border, backgroundColor: colors.tabIdle }]}> 
                 <View style={styles.itemHeaderRow}>
                   <Text style={[styles.itemTitle, { color: colors.title }]} numberOfLines={1}>
-                    {t('admin.reviews.reviewId', { id: review.id.slice(0, 8) })}
+                    {t('admin.reports.reportId', { id: report.id.slice(0, 8) })}
                   </Text>
-                  <Text style={[styles.reportDateText, { color: colors.muted }]}>{formatDateTime(review.created_at, locale, t)}</Text>
+                  <Text style={[styles.reportDateText, { color: colors.muted }]}>{formatDateTime(report.created_at, locale, t)}</Text>
                 </View>
 
                 <Text style={[styles.itemMetaText, { color: colors.muted }]} numberOfLines={1}>
-                  {t('admin.reviews.reviewerLabel', { reviewer: review.reviewer_name?.trim() || review.user_id })}
+                  {t('admin.reports.reporterLabel', { reporter: report.reporter_name?.trim() || report.reporter_id })}
                 </Text>
                 <Text style={[styles.itemMetaText, { color: colors.muted }]}>
-                  {t('admin.reviews.ratingLabel', { rating: review.rating })}
+                  {t('admin.reports.sourceLabel', {
+                    source: report.source === 'event'
+                      ? t('admin.reports.sourceEvent')
+                      : t('admin.reports.sourceDestination'),
+                  })}
+                </Text>
+                <Text style={[styles.itemMetaText, { color: colors.muted }]} numberOfLines={2}>
+                  {t('admin.reports.reasonLabel', { reason: report.reason })}
                 </Text>
 
                 <View style={[styles.flaggedReviewWrap, { borderColor: colors.border }]}>
-                  <Text style={[styles.flaggedReviewTitle, { color: colors.title }]}>{t('admin.reviews.commentTitle')}</Text>
-                  <Text style={[styles.reportReasonText, { color: colors.text }]}>
-                    {t('admin.reviews.commentLabel', { comment: review.comment || t('review.card.noComment') })}
-                  </Text>
-                  <Text style={[styles.itemMetaText, { color: colors.muted }]}>
-                    {t('admin.reviews.helpfulLabel', { count: review.helpful_count })}
-                  </Text>
+                  <Text style={[styles.flaggedReviewTitle, { color: colors.title }]}>{t('admin.reports.flaggedReview')}</Text>
+
+                  {report.review ? (
+                    <>
+                      <Text style={[styles.itemMetaText, { color: colors.muted }]} numberOfLines={1}>
+                        {t('admin.reports.authorLabel', {
+                          author: report.review.reviewer_name?.trim() || report.review.user_id,
+                        })}
+                      </Text>
+                      <Text style={[styles.itemMetaText, { color: colors.muted }]}>
+                        {t('admin.reports.ratingLabel', { rating: report.review.rating })}
+                      </Text>
+                      <Text style={[styles.reportReasonText, { color: colors.text }]}>
+                        {t('admin.reports.commentLabel', {
+                          comment: report.review.comment || t('review.card.noComment'),
+                        })}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={[styles.reportReasonText, { color: colors.muted }]}>
+                      {t('admin.reports.reviewMissing')}
+                    </Text>
+                  )}
                 </View>
 
                 <View style={styles.actionRow}>
+                  <Pressable
+                    onPress={() => {
+                      void onDismissReport(report);
+                    }}
+                    disabled={actingOnReportId === report.id}
+                    style={({ pressed }) => [
+                      styles.dismissBtn,
+                      actingOnReportId === report.id ? { opacity: 0.5 } : null,
+                      pressed ? { opacity: 0.84 } : null,
+                    ]}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.dismissBtnText}>{t('admin.actions.dismissReport')}</Text>
+                  </Pressable>
+
                   <Pressable
                     onPress={() => {
                       Alert.alert(t('admin.alert.deleteReviewTitle'), t('admin.alert.deleteReviewMessage'), [
@@ -561,15 +634,15 @@ export default function AdminDashboardScreen() {
                           text: t('admin.actions.deleteReview'),
                           style: 'destructive',
                           onPress: () => {
-                            void onDeleteReview(review);
+                            void onDeleteReportedReview(report);
                           },
                         },
                       ]);
                     }}
-                    disabled={actingOnReviewId === review.id}
+                    disabled={actingOnReportId === report.id || !report.review}
                     style={({ pressed }) => [
                       styles.deleteBtn,
-                      actingOnReviewId === review.id ? { opacity: 0.5 } : null,
+                      actingOnReportId === report.id || !report.review ? { opacity: 0.5 } : null,
                       pressed ? { opacity: 0.84 } : null,
                     ]}
                     accessibilityRole="button"

@@ -104,6 +104,16 @@ const safeCount = (value: unknown, fallback: number = 0): number => {
   return Math.floor(n);
 };
 
+const isMissingTableError = (error: unknown, tableName: string) => {
+  const code = String((error as any)?.code ?? '').trim().toUpperCase();
+  const message = String((error as any)?.message ?? '').toLowerCase();
+  if (code === 'PGRST205' && message.includes(`public.${tableName}`)) {
+    return true;
+  }
+
+  return message.includes('relation') && message.includes(tableName.toLowerCase()) && message.includes('does not exist');
+};
+
 const getFileExtension = (fileName?: string, contentType?: string): string => {
   if (fileName && fileName.includes('.')) {
     const ext = fileName.split('.').pop()?.trim().toLowerCase();
@@ -256,8 +266,36 @@ export const reviewService = {
       .select('*')
       .single();
 
-    if (error) throw error;
-    return data as ReviewReportRow;
+    if (!error) {
+      return data as ReviewReportRow;
+    }
+
+    // Some environments only migrated event review reporting schema.
+    if (isMissingTableError(error, 'review_reports')) {
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('event_review_reports')
+        .upsert(payload, { onConflict: 'review_id,reporter_id' })
+        .select('*')
+        .single();
+
+      if (!fallbackError) {
+        return {
+          id: String((fallbackData as any)?.id ?? ''),
+          review_id: String((fallbackData as any)?.review_id ?? reviewId),
+          reporter_id: String((fallbackData as any)?.reporter_id ?? userId),
+          reason: String((fallbackData as any)?.reason ?? reason),
+          status: String((fallbackData as any)?.status ?? 'pending') as ReviewReportRow['status'],
+          created_at: String((fallbackData as any)?.created_at ?? new Date().toISOString()),
+        };
+      }
+
+      const fallbackReason = String((fallbackError as any)?.message ?? '').trim();
+      throw new Error(
+        `Table review_reports is missing in the active Supabase schema. Run migration 20260403_reviews_upgrade.sql. ${fallbackReason}`.trim()
+      );
+    }
+
+    throw error;
   },
 
   async replyToReview(input: ReplyToReviewInput): Promise<ReviewReplyResult> {

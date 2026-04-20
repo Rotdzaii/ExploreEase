@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 
 const REVIEW_IMAGES_BUCKET = 'review_images';
+const EVENT_IMAGES_BUCKET = 'event_images';
 
 type ReviewImageScope = 'destination' | 'event' | 'general';
 
@@ -14,6 +15,18 @@ export type UploadReviewImageInput = {
 };
 
 export type UploadReviewImageResult = {
+  path: string;
+  publicUrl: string;
+};
+
+export type UploadEventImageInput = {
+  uri?: string;
+  file?: Blob | ArrayBuffer | Uint8Array;
+  fileName?: string;
+  contentType?: string;
+};
+
+export type UploadEventImageResult = {
   path: string;
   publicUrl: string;
 };
@@ -92,6 +105,31 @@ export const storageService = {
     if (uploadError) throw uploadError;
 
     const { data } = supabase.storage.from(REVIEW_IMAGES_BUCKET).getPublicUrl(filePath);
+
+    return {
+      path: filePath,
+      publicUrl: data.publicUrl,
+    };
+  },
+
+  async uploadEventImage(input: UploadEventImageInput): Promise<UploadEventImageResult> {
+    const userId = await ensureAuthenticatedUserId();
+    const payload = await resolveUploadPayload(input);
+
+    const ext = getFileExtension(input.fileName, payload.contentType);
+    const filePath = `${userId}/events/${Date.now()}-${randomSuffix()}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(EVENT_IMAGES_BUCKET)
+      .upload(filePath, payload.file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: payload.contentType,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from(EVENT_IMAGES_BUCKET).getPublicUrl(filePath);
 
     return {
       path: filePath,

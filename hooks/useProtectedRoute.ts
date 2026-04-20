@@ -8,6 +8,8 @@ import { useGlobalSearchParams, useRootNavigationState, useRouter, useSegments }
 import { useAuth } from '@/src/context/auth';
 import { useI18n } from '@/src/i18n/useI18n';
 import { adminService } from '@/src/services/adminService';
+import { authService } from '@/src/services/authService';
+import { supabase } from '@/src/services/supabase';
 
 const PUBLIC_AUTH_SEGMENTS = new Set([
   'login',
@@ -19,9 +21,11 @@ const PUBLIC_AUTH_SEGMENTS = new Set([
 const ONBOARDING_SEGMENTS = new Set(['interests', 'onboarding']);
 const ONBOARDING_COMPLETED_STORAGE_KEY = 'exploreease.onboarding.completed';
 const BIOMETRIC_LOCK_STORAGE_KEY = 'exploreease.security.biometricLockEnabled';
+const MFA_VERIFY_SEGMENT = 'mfa-verify';
+const PASSWORD_RECOVERY_MODE = 'update-password';
 
 export function useProtectedRoute() {
-  const { session, isInitialized } = useAuth();
+  const { session, isInitialized, isPasswordRecovery } = useAuth();
   const { t } = useI18n();
   const router = useRouter();
   const segments = useSegments();
@@ -43,8 +47,8 @@ export function useProtectedRoute() {
 
     let alive = true;
 
-    const ensureBiometricUnlocked = async (shouldGate: boolean) => {
-      if (!session) return false;
+    const ensureBiometricUnlocked = async (activeSession: typeof session, shouldGate: boolean) => {
+      if (!activeSession) return false;
       if (!shouldGate) return true;
 
       if (Platform.OS === 'web') {
@@ -113,21 +117,74 @@ export function useProtectedRoute() {
       const modeParam = Array.isArray(searchParams.mode) ? searchParams.mode[0] : searchParams.mode;
       const inPublicAuthSegment =
         typeof firstSegment === 'string' && PUBLIC_AUTH_SEGMENTS.has(firstSegment);
+      const inUpdatePasswordSegment =
+        firstSegment === 'forgot-password' && modeParam === PASSWORD_RECOVERY_MODE;
+      const inMfaVerifySegment = firstSegment === MFA_VERIFY_SEGMENT;
       const isRootIndex = segments.join('/') === '';
       const inAdminSegment = firstSegment === 'admin';
       const inTabsSegment = firstSegment === '(tabs)';
       const inOnboardingSegment =
         typeof firstSegment === 'string' && ONBOARDING_SEGMENTS.has(firstSegment);
       const inInterestsEditMode = firstSegment === 'interests' && modeParam === 'edit';
-      const shouldGateTabs = inTabsSegment || inPublicAuthSegment || isRootIndex;
+      const shouldGateTabs =
+        inTabsSegment || isRootIndex || (inPublicAuthSegment && !inUpdatePasswordSegment);
 
-      if (!session && !inPublicAuthSegment) {
+      const { data: latestSessionData, error: latestSessionError } = await supabase.auth.getSession();
+      if (latestSessionError) {
+        console.warn('useProtectedRoute.getSession failed:', latestSessionError.message);
+      }
+
+      const effectiveSession = latestSessionData.session ?? session;
+
+      if (!effectiveSession && !inPublicAuthSegment) {
         router.replace('/login');
         return;
       }
 
-      if (session && shouldGateTabs) {
-        const unlocked = await ensureBiometricUnlocked(shouldGateTabs);
+      if (effectiveSession && isPasswordRecovery && !inUpdatePasswordSegment) {
+        router.replace({
+          pathname: '/forgot-password',
+          params: {
+            mode: PASSWORD_RECOVERY_MODE,
+          },
+        } as any);
+        return;
+      }
+
+      if (effectiveSession) {
+        const mfaGate = await authService.getMfaGateInfo(effectiveSession.user ?? null);
+
+        const sessionUserAal = String(
+          (effectiveSession.user as any)?.aal ?? (effectiveSession.user as any)?.app_metadata?.aal ?? ''
+        )
+          .trim()
+          .toLowerCase();
+        const sessionFactorCount = Array.isArray((effectiveSession.user as any)?.factors)
+          ? ((effectiveSession.user as any).factors as unknown[]).length
+          : 0;
+        const sessionSignalsAal2WithFactors =
+          sessionUserAal === 'aal2' && (sessionFactorCount > 0 || mfaGate.hasKnownFactor);
+
+        const shouldRequireMfa = mfaGate.requiresMfa && !sessionSignalsAal2WithFactors;
+
+        if (shouldRequireMfa && !inMfaVerifySegment) {
+          router.replace({
+            pathname: '/mfa-verify',
+            params: {
+              factorId: mfaGate.factorId ?? '',
+            },
+          } as any);
+          return;
+        }
+
+        if (!shouldRequireMfa && inMfaVerifySegment) {
+          router.replace('/(tabs)');
+          return;
+        }
+      }
+
+      if (effectiveSession && shouldGateTabs) {
+        const unlocked = await ensureBiometricUnlocked(effectiveSession, shouldGateTabs);
         if (!alive) return;
 
         if (!unlocked) {
@@ -138,12 +195,16 @@ export function useProtectedRoute() {
         }
       }
 
-      if (session && (inPublicAuthSegment || isRootIndex)) {
+      if (effectiveSession && (inPublicAuthSegment || isRootIndex)) {
+        if (inUpdatePasswordSegment) {
+          return;
+        }
+
         router.replace('/(tabs)');
         return;
       }
 
-      if (session && inOnboardingSegment && !inInterestsEditMode) {
+      if (effectiveSession && inOnboardingSegment && !inInterestsEditMode) {
         try {
           const hasCompletedOnboarding = await AsyncStorage.getItem(ONBOARDING_COMPLETED_STORAGE_KEY);
           if (!alive) return;
@@ -157,7 +218,7 @@ export function useProtectedRoute() {
         }
       }
 
-      if (session && inAdminSegment) {
+      if (effectiveSession && inAdminSegment) {
         try {
           const isAdmin = await adminService.isCurrentUserAdmin();
           if (!alive) return;
@@ -176,5 +237,5 @@ export function useProtectedRoute() {
     return () => {
       alive = false;
     };
-  }, [isInitialized, navigationState?.key, router, searchParams.mode, segments, session, t]);
+  }, [isInitialized, isPasswordRecovery, navigationState?.key, router, searchParams.mode, segments, session, t]);
 }

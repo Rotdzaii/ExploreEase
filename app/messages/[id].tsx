@@ -1,6 +1,7 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
+import { secureMessageService } from '@/src/services/secureMessageService';
 import {
     socialService,
     type ConversationMessage,
@@ -46,7 +47,7 @@ const toMessageBody = (message: ConversationMessage, t: TranslateFn) => {
 
 export default function ChatRoomScreen() {
   const { id } = useLocalSearchParams<{ id?: string | string[] }>();
-  const conversationId = useMemo(
+  const routeParamId = useMemo(
     () => (Array.isArray(id) ? String(id[0] ?? '').trim() : String(id ?? '').trim()),
     [id]
   );
@@ -56,8 +57,11 @@ export default function ChatRoomScreen() {
   const locale = language === 'vi' ? 'vi-VN' : 'en-US';
 
   const listRef = useRef<FlatList<ConversationMessage> | null>(null);
+  const senderProfileCacheRef = useRef<Map<string, { full_name: string | null; avatar_url: string | null }>>(new Map());
 
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
+  const [conversationId, setConversationId] = useState('');
+  const [currentUserId, setCurrentUserId] = useState('');
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(false);
@@ -81,27 +85,65 @@ export default function ChatRoomScreen() {
   );
 
   const loadConversation = useCallback(async () => {
-    if (!conversationId) return;
+    if (!routeParamId) return;
 
     setLoading(true);
 
     try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+
+      const activeUserId = String(userData.user?.id ?? '').trim();
+      setCurrentUserId(activeUserId);
+
+      const resolvedConversationId = await socialService.resolveConversationIdFromRouteParam(routeParamId);
+
       const [conversationRows, messageRows] = await Promise.all([
         socialService.getConversations(),
-        socialService.getConversationMessages(conversationId, 300),
+        secureMessageService.getConversationMessages(resolvedConversationId, 300),
       ]);
 
-      setConversation(conversationRows.find((row) => row.id === conversationId) ?? null);
+      setConversationId(resolvedConversationId);
+      setConversation(conversationRows.find((row) => row.id === resolvedConversationId) ?? null);
       setMessages(messageRows);
     } catch (err: any) {
       console.warn('load chat room failed:', err?.message ?? err);
       setConversation(null);
+      setConversationId('');
+      setCurrentUserId('');
       setMessages([]);
       Alert.alert(t('messages.chat.error.loadTitle'), t('messages.chat.error.loadBody'));
     } finally {
       setLoading(false);
     }
-  }, [conversationId, t]);
+  }, [routeParamId, t]);
+
+  const fetchSenderProfile = useCallback(async (senderId: string) => {
+    const safeSenderId = String(senderId ?? '').trim();
+    if (!safeSenderId) return null;
+
+    const cached = senderProfileCacheRef.current.get(safeSenderId);
+    if (cached) return cached;
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('full_name, avatar_url')
+      .eq('id', safeSenderId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('fetchSenderProfile realtime failed:', error.message);
+      return null;
+    }
+
+    const profile = {
+      full_name: String((data as any)?.full_name ?? '').trim() || null,
+      avatar_url: String((data as any)?.avatar_url ?? '').trim() || null,
+    };
+
+    senderProfileCacheRef.current.set(safeSenderId, profile);
+    return profile;
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -114,7 +156,7 @@ export default function ChatRoomScreen() {
     if (!conversationId) return;
 
     try {
-      const rows = await socialService.getConversationMessages(conversationId, 300);
+      const rows = await secureMessageService.getConversationMessages(conversationId, 300);
       setMessages(rows);
     } catch (err: any) {
       console.warn('realtime message refresh failed:', err?.message ?? err);
@@ -125,9 +167,10 @@ export default function ChatRoomScreen() {
     if (!conversationId) return;
 
     let active = true;
+    const channelName = `chat-room:${conversationId}`;
 
     const channel = supabase
-      .channel(`chat-room:${conversationId}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
@@ -136,25 +179,55 @@ export default function ChatRoomScreen() {
           table: 'messages',
           filter: `conversation_id=eq.${conversationId}`,
         },
-        () => {
+        (payload) => {
           if (!active) return;
-          void refreshMessagesRealtime();
+
+          void (async () => {
+            const inserted = secureMessageService.toConversationMessageFromInsert(payload.new as any, {
+              currentUserId,
+              senderProfile: await fetchSenderProfile(String((payload.new as any)?.sender_id ?? '')),
+            });
+
+            if (!inserted) {
+              await refreshMessagesRealtime();
+              return;
+            }
+
+            setMessages((prev) => {
+              if (prev.some((item) => item.id === inserted.id)) return prev;
+
+              const next = [...prev, inserted];
+              next.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+              return next;
+            });
+          })();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (!active) return;
+
+        if (status === 'SUBSCRIBED') {
+          void refreshMessagesRealtime();
+          return;
+        }
+
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn(`chat realtime join failed (${status}) for ${channelName}`);
+        }
+      });
 
     return () => {
       active = false;
       void supabase.removeChannel(channel);
     };
-  }, [conversationId, refreshMessagesRealtime]);
+  }, [conversationId, currentUserId, fetchSenderProfile, refreshMessagesRealtime]);
 
   const onRefresh = useCallback(async () => {
     if (!conversationId) return;
 
     setRefreshing(true);
     try {
-      const rows = await socialService.getConversationMessages(conversationId, 300);
+      const rows = await secureMessageService.getConversationMessages(conversationId, 300);
       setMessages(rows);
     } catch (err: any) {
       console.warn('refresh chat failed:', err?.message ?? err);
@@ -183,7 +256,7 @@ export default function ChatRoomScreen() {
     setDraft('');
 
     try {
-      const created = await socialService.sendTextMessage(conversationId, safeDraft);
+      const created = await secureMessageService.sendEncryptedTextMessage(conversationId, safeDraft);
       setMessages((prev) => [...prev, created]);
     } catch (err: any) {
       console.warn('send message failed:', err?.message ?? err);
@@ -279,6 +352,10 @@ export default function ChatRoomScreen() {
               <Text style={[styles.chatSubtitle, { color: colors.subtitle }]} numberOfLines={1}>
                 {chatSubtitle}
               </Text>
+              <View style={[styles.e2eeBadge, { borderColor: colors.border, backgroundColor: colors.cardBg }]}>
+                <Feather name="lock" size={11} color={ExploreEaseColors.primary} />
+                <Text style={[styles.e2eeBadgeText, { color: colors.subtitle }]}>E2EE AES</Text>
+              </View>
             </View>
           </View>
 
@@ -403,6 +480,22 @@ const styles = StyleSheet.create({
   chatSubtitle: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  e2eeBadge: {
+    marginTop: 4,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  e2eeBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   loadingWrap: {
     flex: 1,

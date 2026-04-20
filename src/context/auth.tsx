@@ -11,6 +11,7 @@ type AuthContextValue = {
   session: Session | null;
   user: User | null;
   isInitialized: boolean;
+  isPasswordRecovery: boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -18,6 +19,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const SESSION_REFRESH_RETRY_DELAY_MS = 12_000;
 const SESSION_EXPIRY_GRACE_MS = 4_000;
 const SIGNED_OUT_TIMEOUT_WINDOW_MS = 90_000;
+const PASSWORD_RECOVERY_MODE = 'update-password';
 
 const isNetworkAuthError = (message: string) => {
   const lower = message.toLowerCase();
@@ -45,6 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   const getText = useCallback((key: string, params?: Record<string, string | number>) => {
     const lang = useLanguageStore.getState().language;
@@ -75,6 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setSession(null);
     setUser(null);
+    setIsPasswordRecovery(false);
     setIsInitialized(true);
 
     Alert.alert(getText('auth.sessionExpiredTitle'), getText('auth.sessionExpiredMessage'));
@@ -173,6 +177,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(resolvedSession);
       setUser(resolvedSession?.user ?? null);
 
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true);
+        router.replace({
+          pathname: '/forgot-password',
+          params: {
+            mode: PASSWORD_RECOVERY_MODE,
+          },
+        } as any);
+      } else if (event === 'SIGNED_OUT') {
+        setIsPasswordRecovery(false);
+      }
+
       if (resolvedSession) {
         hasForcedTimeoutLogoutRef.current = false;
         lastSessionExpiresAtMsRef.current = Number(resolvedSession.expires_at ?? 0) * 1000;
@@ -221,8 +237,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       session,
       user,
       isInitialized,
+      isPasswordRecovery,
     }),
-    [isInitialized, session, user]
+    [isInitialized, isPasswordRecovery, session, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
