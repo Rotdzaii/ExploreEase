@@ -4,7 +4,7 @@ import { useI18n } from '@/src/i18n/useI18n';
 import { Feather } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import React, { useCallback, useMemo, useRef } from 'react';
-import { Alert, Pressable, Share as RNShare, StyleSheet, Text, View } from 'react-native';
+import { Alert, Keyboard, Platform, Pressable, Share as RNShare, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 // react-native-share may not work in Expo Go; keep a safe fallback.
@@ -21,6 +21,21 @@ type ShareTripBottomSheetProps = {
   tripName: string;
   tripCode: string;
   onClose: () => void;
+};
+
+const releaseOverlayTriggerFocus = () => {
+  Keyboard.dismiss();
+
+  if (Platform.OS !== 'web') return;
+
+  try {
+    const activeElement = (globalThis as any)?.document?.activeElement as { blur?: () => void } | null | undefined;
+    if (activeElement && typeof activeElement.blur === 'function') {
+      activeElement.blur();
+    }
+  } catch {
+    // Ignore focus release failures on unsupported environments.
+  }
 };
 
 export function ShareTripBottomSheet({ isOpen, tripName, tripCode, onClose }: ShareTripBottomSheetProps) {
@@ -43,7 +58,10 @@ export function ShareTripBottomSheet({ isOpen, tripName, tripCode, onClose }: Sh
 
   React.useEffect(() => {
     if (!sheetRef.current) return;
-    if (isOpen) sheetRef.current.snapToIndex(0);
+    if (isOpen) {
+      releaseOverlayTriggerFocus();
+      sheetRef.current.snapToIndex(0);
+    }
     else sheetRef.current.close();
   }, [isOpen]);
 

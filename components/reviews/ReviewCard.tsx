@@ -25,6 +25,9 @@ type ReviewCardProps = {
   onSubmitReply: () => void;
   onToggleHelpful: () => void;
   onReport: () => void;
+  reportDisabled?: boolean;
+  reportLoading?: boolean;
+  onPressReviewer?: () => void;
 };
 
 const formatReviewDate = (value: string | null | undefined, locale: string) => {
@@ -54,11 +57,61 @@ export function ReviewCard({
   onSubmitReply,
   onToggleHelpful,
   onReport,
+  reportDisabled = false,
+  reportLoading = false,
+  onPressReviewer,
 }: ReviewCardProps) {
   const { t, language } = useI18n();
   const cardBg = isDark ? 'rgba(255,255,255,0.92)' : '#ffffff';
   const cardBorder = 'rgba(15, 23, 42, 0.10)';
   const reviewDateText = formatReviewDate(createdAt, language === 'en' ? 'en-US' : 'vi-VN');
+
+  const reviewerIdentity = (
+    <>
+      <View
+        style={[
+          styles.avatarWrap,
+          {
+            width: scale(40),
+            height: scale(40),
+            borderRadius: scale(20),
+            borderColor: 'rgba(15, 23, 42, 0.10)',
+            backgroundColor: 'rgba(15, 23, 42, 0.04)',
+          },
+        ]}
+      >
+        {avatarUrl ? (
+          <Image source={{ uri: avatarUrl }} style={{ width: '100%', height: '100%', borderRadius: scale(20) }} />
+        ) : (
+          <View style={{ flex: 1, borderRadius: scale(20), backgroundColor: 'rgba(15, 23, 42, 0.10)' }} />
+        )}
+      </View>
+
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: '#020617', fontWeight: '900', fontSize: scale(14) }} numberOfLines={1}>
+          {reviewerName}
+        </Text>
+        <View style={styles.reviewStarsRow}>
+          <View style={styles.starsRow}>
+            {Array.from({ length: 5 }).map((_, idx) => {
+              const filled = idx < Math.round(rating);
+              return (
+                <MaterialCommunityIcons
+                  key={idx}
+                  name={filled ? 'star' : 'star-outline'}
+                  size={scale(14)}
+                  color={ExploreEaseColors.primary}
+                />
+              );
+            })}
+          </View>
+          <Text style={{ color: '#020617', fontWeight: '800', fontSize: scale(12) }}>
+            {Number(rating).toFixed(1)}
+          </Text>
+        </View>
+      </View>
+    </>
+  );
 
   return (
     <View
@@ -74,48 +127,20 @@ export function ReviewCard({
       ]}
     >
       <View style={styles.reviewTopRow}>
-        <View
-          style={[
-            styles.avatarWrap,
-            {
-              width: scale(40),
-              height: scale(40),
-              borderRadius: scale(20),
-              borderColor: 'rgba(15, 23, 42, 0.10)',
-              backgroundColor: 'rgba(15, 23, 42, 0.04)',
-            },
-          ]}
-        >
-          {avatarUrl ? (
-            <Image source={{ uri: avatarUrl }} style={{ width: '100%', height: '100%', borderRadius: scale(20) }} />
-          ) : (
-            <View style={{ flex: 1, borderRadius: scale(20), backgroundColor: 'rgba(15, 23, 42, 0.10)' }} />
-          )}
-        </View>
-
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: '#020617', fontWeight: '900', fontSize: scale(14) }} numberOfLines={1}>
-            {reviewerName}
-          </Text>
-          <View style={styles.reviewStarsRow}>
-            <View style={styles.starsRow}>
-              {Array.from({ length: 5 }).map((_, idx) => {
-                const filled = idx < Math.round(rating);
-                return (
-                  <MaterialCommunityIcons
-                    key={idx}
-                    name={filled ? 'star' : 'star-outline'}
-                    size={scale(14)}
-                    color={ExploreEaseColors.primary}
-                  />
-                );
-              })}
-            </View>
-            <Text style={{ color: '#020617', fontWeight: '800', fontSize: scale(12) }}>
-              {Number(rating).toFixed(1)}
-            </Text>
+        {onPressReviewer ? (
+          <Pressable
+            onPress={onPressReviewer}
+            style={({ pressed }) => [styles.reviewerIdentityWrap, pressed ? { opacity: 0.82 } : null]}
+            accessibilityRole="button"
+            accessibilityLabel={t('home.openProfile')}
+          >
+            {reviewerIdentity}
+          </Pressable>
+        ) : (
+          <View style={styles.reviewerIdentityWrap}>
+            {reviewerIdentity}
           </View>
-        </View>
+        )}
 
         {reviewDateText ? (
           <Text style={{ fontWeight: '700', fontSize: scale(11), color: 'rgba(15,23,42,0.56)' }}>
@@ -175,11 +200,19 @@ export function ReviewCard({
 
         <Pressable
           onPress={onReport}
-          style={({ pressed }) => [styles.reviewActionBtn, pressed ? { opacity: 0.82 } : null]}
+          disabled={reportDisabled || reportLoading}
+          style={({ pressed }) => [
+            styles.reviewActionBtn,
+            reportDisabled ? styles.reviewActionBtnDisabled : null,
+            (reportDisabled || reportLoading) ? { opacity: 0.65 } : null,
+            pressed ? { opacity: 0.82 } : null,
+          ]}
           accessibilityRole="button"
         >
-          <MaterialCommunityIcons name="flag-outline" size={scale(14)} color="#b91c1c" />
-          <Text style={[styles.reviewActionText, { color: '#b91c1c' }]}>{t('review.card.report')}</Text>
+          <MaterialCommunityIcons name={reportDisabled ? 'flag' : 'flag-outline'} size={scale(14)} color="#b91c1c" />
+          <Text style={[styles.reviewActionText, { color: '#b91c1c' }]}>
+            {t('review.card.report')}
+          </Text>
         </Pressable>
       </View>
 
@@ -254,6 +287,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  reviewerIdentityWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   avatarWrap: {
     overflow: 'hidden',
     borderWidth: 1,
@@ -288,6 +327,10 @@ const styles = StyleSheet.create({
   reviewActionBtnActive: {
     borderColor: 'rgba(3,105,161,0.35)',
     backgroundColor: 'rgba(3,105,161,0.10)',
+  },
+  reviewActionBtnDisabled: {
+    borderColor: 'rgba(185,28,28,0.30)',
+    backgroundColor: 'rgba(185,28,28,0.08)',
   },
   reviewActionText: {
     fontSize: 12,

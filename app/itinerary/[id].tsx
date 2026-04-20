@@ -13,6 +13,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Keyboard,
+    Platform,
     Pressable,
     SafeAreaView,
     ScrollView,
@@ -72,6 +74,21 @@ const mapTripRowToDetail = (row: TripRow, locale: string): TripDetail => {
     endDate: toShortDate(end, locale),
     daysCount: toDaysCount(start, end),
   };
+};
+
+const releaseOverlayTriggerFocus = () => {
+  Keyboard.dismiss();
+
+  if (Platform.OS !== 'web') return;
+
+  try {
+    const activeElement = (globalThis as any)?.document?.activeElement as { blur?: () => void } | null | undefined;
+    if (activeElement && typeof activeElement.blur === 'function') {
+      activeElement.blur();
+    }
+  } catch {
+    // Ignore focus release failures on unsupported environments.
+  }
 };
 
 export default function ItineraryDetailScreen() {
@@ -297,7 +314,10 @@ export default function ItineraryDetailScreen() {
         </Text>
 
         <Pressable
-          onPress={() => setIsShareOpen(true)}
+          onPress={() => {
+            releaseOverlayTriggerFocus();
+            setIsShareOpen(true);
+          }}
           style={({ pressed, hovered }) => [
             styles.headerIconBtn,
             hovered ? { opacity: 0.95 } : null,
@@ -405,7 +425,10 @@ export default function ItineraryDetailScreen() {
           <TripActionBar
             optimized={optimized}
             onOptimizeRoute={() => setOptimized((prev) => !prev)}
-            onShare={() => setIsShareOpen(true)}
+            onShare={() => {
+              releaseOverlayTriggerFocus();
+              setIsShareOpen(true);
+            }}
           />
         </View>
       </ScrollView>

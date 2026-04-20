@@ -1,4 +1,11 @@
-import { extractTravelSearchIntent, generateEmbedding, type TravelCategoryHint, type TravelIntentType } from './aiService';
+import {
+    extractTravelSearchIntent,
+    generateEmbedding,
+    translateSmartSearchTexts,
+    type SmartSearchLanguageCode,
+    type TravelCategoryHint,
+    type TravelIntentType,
+} from './aiService';
 import { secureCacheService } from './secureCacheService';
 import { supabase } from './supabase';
 
@@ -36,8 +43,12 @@ export type DiscoveryPriceFilter = 'all' | 'free' | 'paid';
 export type DestinationDiscoveryRow = {
   id: string | number;
   name: string;
+  name_vi?: string | null;
+  name_en?: string | null;
   location?: string | null;
   description?: string | null;
+  description_vi?: string | null;
+  description_en?: string | null;
   price?: number | string | null;
   rating?: number | null;
   image_url?: string | null;
@@ -52,6 +63,31 @@ export type DestinationDiscoveryRow = {
     name?: string | null;
   } | null;
 };
+
+export type PersonalizedRecommendationRow = DestinationDiscoveryRow & {
+  recommendation_score?: number | null;
+  reason?: string | null;
+};
+
+export type NearbyTopRatedRow = DestinationDiscoveryRow & {
+  distance_km?: number | null;
+  recommendation_score?: number | null;
+};
+
+export type SearchFilterCategory = 'all' | 'attractions' | 'cuisines' | 'activities';
+export type SearchFilterSort = 'relevance' | 'top-rated' | 'price-asc' | 'price-desc' | 'a-z';
+
+export type SearchFilterDestinationsInput = {
+  searchText?: string | null;
+  category?: SearchFilterCategory;
+  minRating?: number | null;
+  maxPrice?: number | null;
+  sortBy?: SearchFilterSort;
+  limit?: number;
+  offset?: number;
+};
+
+export type SearchFilterDestinationRow = DestinationDiscoveryRow;
 
 export type EventDiscoveryRow = {
   id: string;
@@ -91,6 +127,18 @@ export type DiscoveryQueryFilters = {
   offset?: number;
 };
 
+export type SmartSearchLocalizationSource = 'default' | 'localized_columns' | 'ai_fallback_translation';
+
+export type DestinationSmartSearchResult = {
+  rows: DestinationDiscoveryRow[];
+  localizationSource: SmartSearchLocalizationSource;
+  targetLanguage: SmartSearchLanguageCode;
+};
+
+type DestinationSearchLanguageOptions = {
+  currentLanguage?: string | null;
+};
+
 type DestinationVectorMatchRow = {
   id: string;
   similarity?: number | null;
@@ -108,6 +156,306 @@ export type DestinationDetailLookupResult = {
 };
 
 const buildDestinationCacheKey = (destinationId: string) => `destination-detail:${destinationId}`;
+
+const toNullableString = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+};
+
+const toNullableNumber = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const normalizePersonalizedRecommendationRow = (
+  row: Record<string, unknown>
+): PersonalizedRecommendationRow | null => {
+  const idCandidate = row.id ?? row.destination_id ?? row.destinationId;
+  if (typeof idCandidate !== 'string' && typeof idCandidate !== 'number') return null;
+
+  const name =
+    toNullableString(row.name) ??
+    toNullableString(row.destination_name) ??
+    toNullableString(row.title) ??
+    '';
+
+  if (!name) return null;
+
+  const categoryName =
+    toNullableString((row.categories as { name?: unknown } | null | undefined)?.name) ??
+    toNullableString(row.category_name);
+
+  const normalizedRating = toNullableNumber(row.rating ?? row.destination_rating);
+  const recommendationScore = toNullableNumber(row.recommendation_score ?? row.match_score ?? row.score);
+
+  const categoryIdCandidate = row.category_id ?? row.destination_category_id;
+  const normalizedCategoryId =
+    typeof categoryIdCandidate === 'string' || typeof categoryIdCandidate === 'number'
+      ? categoryIdCandidate
+      : null;
+
+  return {
+    id: idCandidate,
+    name,
+    location: toNullableString(row.location) ?? toNullableString(row.destination_location),
+    description: toNullableString(row.description) ?? toNullableString(row.destination_description),
+    price: (row.price ?? row.destination_price ?? null) as number | string | null,
+    rating: normalizedRating,
+    image_url: toNullableString(row.image_url) ?? toNullableString(row.destination_image_url),
+    category_id: normalizedCategoryId,
+    latitude: toNullableNumber(row.latitude ?? row.destination_latitude ?? row.lat),
+    longitude: toNullableNumber(row.longitude ?? row.destination_longitude ?? row.lng),
+    lat: toNullableNumber(row.lat ?? row.destination_lat),
+    lng: toNullableNumber(row.lng ?? row.destination_lng),
+    categories: categoryName ? { name: categoryName } : null,
+    similarity: recommendationScore,
+    recommendation_score: recommendationScore,
+    reason:
+      toNullableString(row.reason) ??
+      toNullableString(row.match_reason) ??
+      toNullableString(row.recommendation_reason),
+  };
+};
+
+const normalizeNearbyTopRatedRow = (
+  row: Record<string, unknown>
+): NearbyTopRatedRow | null => {
+  const base = normalizePersonalizedRecommendationRow(row);
+  if (!base) return null;
+
+  const distanceKm = toNullableNumber(row.distance_km ?? row.distance);
+
+  return {
+    ...base,
+    distance_km: distanceKm,
+  };
+};
+
+const normalizeSmartSearchLanguage = (value?: string | null): SmartSearchLanguageCode => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'en') return 'en';
+  if (normalized === 'ja') return 'ja';
+  return 'vi';
+};
+
+const getCurrentUserIdSafe = async (): Promise<string | null> => {
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) return null;
+    return data.user?.id ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const isMissingColumnError = (error: unknown, columnName: string) => {
+  const message = String((error as any)?.message ?? '').toLowerCase();
+  return message.includes('does not exist') && message.includes(columnName.toLowerCase());
+};
+
+const DESTINATION_BASE_SELECT =
+  'id, name, location, description, price, rating, image_url, category_id, latitude, longitude, created_at, categories(name)';
+
+const DESTINATION_LOCALIZED_SELECT =
+  'id, name, name_vi, name_en, location, description, description_vi, description_en, price, rating, image_url, category_id, latitude, longitude, created_at, categories(name)';
+
+let destinationLocalizedColumnsSupported: 'unknown' | 'yes' | 'no' = 'unknown';
+
+const isMissingLocalizedColumnError = (error: unknown) => {
+  const message = String((error as any)?.message ?? '').toLowerCase();
+  if (!message.includes('does not exist')) return false;
+
+  return (
+    message.includes('name_vi') ||
+    message.includes('name_en') ||
+    message.includes('description_vi') ||
+    message.includes('description_en')
+  );
+};
+
+const runDestinationQueryWithLocalizedFallback = async <TRow>(
+  runQuery: (input: {
+    selectColumns: string;
+    supportsLocalizedColumns: boolean;
+  }) => Promise<{ data: TRow[] | null; error: any }>
+): Promise<{ rows: TRow[]; usedLocalizedColumns: boolean }> => {
+  if (destinationLocalizedColumnsSupported === 'no') {
+    const baseResult = await runQuery({
+      selectColumns: DESTINATION_BASE_SELECT,
+      supportsLocalizedColumns: false,
+    });
+    if (baseResult.error) throw baseResult.error;
+    return { rows: (baseResult.data ?? []) as TRow[], usedLocalizedColumns: false };
+  }
+
+  const localizedResult = await runQuery({
+    selectColumns: DESTINATION_LOCALIZED_SELECT,
+    supportsLocalizedColumns: true,
+  });
+
+  if (!localizedResult.error) {
+    destinationLocalizedColumnsSupported = 'yes';
+    return { rows: (localizedResult.data ?? []) as TRow[], usedLocalizedColumns: true };
+  }
+
+  if (!isMissingLocalizedColumnError(localizedResult.error)) {
+    throw localizedResult.error;
+  }
+
+  destinationLocalizedColumnsSupported = 'no';
+
+  const baseResult = await runQuery({
+    selectColumns: DESTINATION_BASE_SELECT,
+    supportsLocalizedColumns: false,
+  });
+
+  if (baseResult.error) throw baseResult.error;
+  return { rows: (baseResult.data ?? []) as TRow[], usedLocalizedColumns: false };
+};
+
+const mapRowsByLocalizedColumns = (
+  rows: DestinationDiscoveryRow[],
+  targetLanguage: SmartSearchLanguageCode,
+  canUseLocalizedColumns: boolean
+): { rows: DestinationDiscoveryRow[]; usedLocalizedField: boolean } => {
+  if (!canUseLocalizedColumns) {
+    return { rows, usedLocalizedField: false };
+  }
+
+  let usedLocalizedField = false;
+
+  const mappedRows = rows.map((row) => {
+    const localizedName =
+      targetLanguage === 'en'
+        ? String((row as any).name_en ?? '').trim()
+        : targetLanguage === 'vi'
+          ? String((row as any).name_vi ?? '').trim()
+          : '';
+
+    const localizedDescription =
+      targetLanguage === 'en'
+        ? String((row as any).description_en ?? '').trim()
+        : targetLanguage === 'vi'
+          ? String((row as any).description_vi ?? '').trim()
+          : '';
+
+    if (localizedName || localizedDescription) {
+      usedLocalizedField = true;
+    }
+
+    return {
+      ...row,
+      name: localizedName || row.name,
+      description: localizedDescription || row.description,
+    };
+  });
+
+  return {
+    rows: mappedRows,
+    usedLocalizedField,
+  };
+};
+
+const applyAiFallbackTranslation = async (
+  rows: DestinationDiscoveryRow[],
+  targetLanguage: SmartSearchLanguageCode
+): Promise<{ rows: DestinationDiscoveryRow[]; didTranslate: boolean }> => {
+  if (rows.length === 0 || targetLanguage === 'vi') {
+    return { rows, didTranslate: false };
+  }
+
+  const maxRows = Math.min(rows.length, 20);
+  const textsToTranslate: string[] = [];
+  const translationTargets: { rowIndex: number; field: 'name' | 'description' }[] = [];
+
+  for (let index = 0; index < maxRows; index += 1) {
+    const row = rows[index];
+    const nameText = String(row.name ?? '').trim();
+    const descriptionText = String(row.description ?? '').trim();
+
+    if (nameText) {
+      translationTargets.push({ rowIndex: index, field: 'name' });
+      textsToTranslate.push(nameText);
+    }
+
+    if (descriptionText) {
+      translationTargets.push({ rowIndex: index, field: 'description' });
+      textsToTranslate.push(descriptionText);
+    }
+  }
+
+  if (textsToTranslate.length === 0) {
+    return { rows, didTranslate: false };
+  }
+
+  try {
+    const translatedTexts = await translateSmartSearchTexts(textsToTranslate, {
+      fromLanguage: 'vi',
+      toLanguage: targetLanguage,
+    });
+
+    if (translatedTexts.length !== textsToTranslate.length) {
+      return { rows, didTranslate: false };
+    }
+
+    const nextRows = rows.map((row) => ({ ...row }));
+    let didTranslate = false;
+
+    for (let index = 0; index < translationTargets.length; index += 1) {
+      const target = translationTargets[index];
+      const translated = String(translatedTexts[index] ?? '').trim();
+      if (!translated) continue;
+
+      const row = nextRows[target.rowIndex];
+      if (!row) continue;
+
+      row[target.field] = translated;
+      didTranslate = true;
+    }
+
+    return { rows: nextRows, didTranslate };
+  } catch (error: any) {
+    console.warn('applyAiFallbackTranslation failed:', error?.message ?? error);
+    return { rows, didTranslate: false };
+  }
+};
+
+const buildSmartSearchResult = async (
+  rows: DestinationDiscoveryRow[],
+  targetLanguage: SmartSearchLanguageCode,
+  usedLocalizedColumns: boolean
+): Promise<DestinationSmartSearchResult> => {
+  const localizedMapping = mapRowsByLocalizedColumns(rows, targetLanguage, usedLocalizedColumns);
+
+  if (localizedMapping.usedLocalizedField) {
+    return {
+      rows: localizedMapping.rows,
+      localizationSource: 'localized_columns',
+      targetLanguage,
+    };
+  }
+
+  const translated = await applyAiFallbackTranslation(localizedMapping.rows, targetLanguage);
+
+  if (translated.didTranslate) {
+    return {
+      rows: translated.rows,
+      localizationSource: 'ai_fallback_translation',
+      targetLanguage,
+    };
+  }
+
+  return {
+    rows: localizedMapping.rows,
+    localizationSource: 'default',
+    targetLanguage,
+  };
+};
 
 type SearchIntentProfile = {
   key: 'spiritual' | 'beach' | 'mountain' | 'relax';
@@ -381,6 +729,7 @@ const buildAiGuidedOrClause = (input: {
   aiSuggestedPlaces: string[];
   categoryIds: (string | number)[];
   rawQuery: string;
+  includeLocalizedColumns?: boolean;
 }) => {
   const aiPlaceTerms = uniqueTerms(
     (input.aiSuggestedPlaces ?? [])
@@ -395,6 +744,15 @@ const buildAiGuidedOrClause = (input: {
   const tier1Terms = aiPlaceTerms.length > 0 ? aiPlaceTerms : fallbackQueryTerms;
   for (const term of tier1Terms) {
     clauses.push(`name.ilike.%${term}%`);
+    clauses.push(`location.ilike.%${term}%`);
+    clauses.push(`description.ilike.%${term}%`);
+
+    if (input.includeLocalizedColumns) {
+      clauses.push(`name_vi.ilike.%${term}%`);
+      clauses.push(`name_en.ilike.%${term}%`);
+      clauses.push(`description_vi.ilike.%${term}%`);
+      clauses.push(`description_en.ilike.%${term}%`);
+    }
   }
 
   if ((input.categoryIds ?? []).length > 0) {
@@ -422,7 +780,10 @@ const buildSemanticQueryText = (rawQuery: string) => {
   return `${rawQuery}\nIntent hints: ${semanticHints.join(', ')}`;
 };
 
-const buildKeywordOrClause = (rawQuery: string) => {
+const buildKeywordOrClause = (
+  rawQuery: string,
+  includeLocalizedColumns: boolean = destinationLocalizedColumnsSupported !== 'no'
+) => {
   const trimmed = rawQuery.trim();
   const intents = detectIntents(trimmed);
 
@@ -432,11 +793,25 @@ const buildKeywordOrClause = (rawQuery: string) => {
     `description.ilike.%${trimmed}%`,
   ];
 
+  if (includeLocalizedColumns) {
+    clauses.push(`name_vi.ilike.%${trimmed}%`);
+    clauses.push(`name_en.ilike.%${trimmed}%`);
+    clauses.push(`description_vi.ilike.%${trimmed}%`);
+    clauses.push(`description_en.ilike.%${trimmed}%`);
+  }
+
   const keywordTerms = uniqueTerms(intents.flatMap((intent) => intent.keywordTerms));
   for (const term of keywordTerms) {
     clauses.push(`name.ilike.%${term}%`);
     clauses.push(`location.ilike.%${term}%`);
     clauses.push(`description.ilike.%${term}%`);
+
+    if (includeLocalizedColumns) {
+      clauses.push(`name_vi.ilike.%${term}%`);
+      clauses.push(`name_en.ilike.%${term}%`);
+      clauses.push(`description_vi.ilike.%${term}%`);
+      clauses.push(`description_en.ilike.%${term}%`);
+    }
   }
 
   return clauses.join(',');
@@ -507,16 +882,216 @@ export const destinationService = {
   },
 
   // Lấy danh sách Destinations (kèm filter nếu cần)
-  async getDestinations(isFeatured?: boolean) {
+  async getDestinations(input?: boolean | { isFeatured?: boolean; limit?: number; offset?: number }) {
+    const options = typeof input === 'boolean' ? { isFeatured: input } : (input ?? {});
+    const isFeatured = typeof options.isFeatured === 'boolean' ? options.isFeatured : undefined;
+    const limit = typeof options.limit === 'number' && Number.isFinite(options.limit)
+      ? Math.max(1, Math.min(100, Math.floor(options.limit)))
+      : null;
+    const offset = typeof options.offset === 'number' && Number.isFinite(options.offset)
+      ? Math.max(0, Math.floor(options.offset))
+      : 0;
+
     let query = supabase.from('destinations').select('*, categories(name)');
-    
+
     if (isFeatured !== undefined) {
       query = query.eq('is_featured', isFeatured);
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false });
+    query = query.order('created_at', { ascending: false });
+
+    if (limit !== null) {
+      query = query.range(offset, offset + limit - 1);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     return data;
+  },
+
+  async getPersonalizedRecommendations(
+    userId: string,
+    limit: number = 5
+  ): Promise<PersonalizedRecommendationRow[]> {
+    const normalizedUserId = String(userId ?? '').trim();
+    if (!normalizedUserId) return [];
+
+    const safeLimit = Math.max(1, Math.min(20, Math.floor(limit || 5)));
+
+    const { data, error } = await supabase.rpc('get_personalized_recommendations', {
+      p_user_id: normalizedUserId,
+      p_limit: safeLimit,
+    });
+
+    if (error) throw error;
+
+    const rowsRaw = Array.isArray(data) ? data : [];
+    const seenIds = new Set<string>();
+    const rows: PersonalizedRecommendationRow[] = [];
+
+    for (const item of rowsRaw) {
+      if (!item || typeof item !== 'object') continue;
+
+      const normalized = normalizePersonalizedRecommendationRow(item as Record<string, unknown>);
+      if (!normalized) continue;
+
+      const dedupeKey = String(normalized.id);
+      if (seenIds.has(dedupeKey)) continue;
+
+      seenIds.add(dedupeKey);
+      rows.push(normalized);
+    }
+
+    return rows;
+  },
+
+  async getNearbyTopRated(
+    userLat: number,
+    userLon: number,
+    radiusKm: number = 5
+  ): Promise<NearbyTopRatedRow[]> {
+    const safeLat = Number(userLat);
+    const safeLon = Number(userLon);
+    if (!Number.isFinite(safeLat) || !Number.isFinite(safeLon)) return [];
+
+    const safeRadiusKm = Number.isFinite(Number(radiusKm))
+      ? Math.max(0.5, Math.min(50, Number(radiusKm)))
+      : 5;
+
+    const { data, error } = await supabase.rpc('get_nearby_top_rated', {
+      user_lat: safeLat,
+      user_lon: safeLon,
+      radius_km: safeRadiusKm,
+    });
+
+    if (error) throw error;
+
+    const rowsRaw = Array.isArray(data) ? data : [];
+    const seenIds = new Set<string>();
+    const rows: NearbyTopRatedRow[] = [];
+
+    for (const item of rowsRaw) {
+      if (!item || typeof item !== 'object') continue;
+
+      const normalized = normalizeNearbyTopRatedRow(item as Record<string, unknown>);
+      if (!normalized) continue;
+
+      const dedupeKey = String(normalized.id);
+      if (seenIds.has(dedupeKey)) continue;
+
+      seenIds.add(dedupeKey);
+      rows.push(normalized);
+    }
+
+    rows.sort((a, b) => {
+      const aDistance = typeof a.distance_km === 'number' && Number.isFinite(a.distance_km)
+        ? a.distance_km
+        : Number.POSITIVE_INFINITY;
+      const bDistance = typeof b.distance_km === 'number' && Number.isFinite(b.distance_km)
+        ? b.distance_km
+        : Number.POSITIVE_INFINITY;
+
+      if (aDistance !== bDistance) return aDistance - bDistance;
+
+      const bRating = typeof b.rating === 'number' && Number.isFinite(b.rating) ? b.rating : 0;
+      const aRating = typeof a.rating === 'number' && Number.isFinite(a.rating) ? a.rating : 0;
+      return bRating - aRating;
+    });
+
+    return rows;
+  },
+
+  async searchAndFilterDestinations(
+    input: SearchFilterDestinationsInput = {}
+  ): Promise<SearchFilterDestinationRow[]> {
+    const searchText = String(input.searchText ?? '').trim();
+    const category = input.category && input.category !== 'all' ? input.category : null;
+    const minRating = typeof input.minRating === 'number' && Number.isFinite(input.minRating)
+      ? Math.max(0, Math.min(5, input.minRating))
+      : 0;
+    const maxPrice = typeof input.maxPrice === 'number' && Number.isFinite(input.maxPrice)
+      ? Math.max(0, input.maxPrice)
+      : null;
+    const sortBy = input.sortBy ?? 'relevance';
+    const limit = Number.isFinite(Number(input.limit))
+      ? Math.max(1, Math.min(100, Number(input.limit)))
+      : 40;
+    const offset = Number.isFinite(Number(input.offset))
+      ? Math.max(0, Number(input.offset))
+      : 0;
+
+    const payloadAttempts = [
+      {
+        query: searchText || null,
+        category,
+        min_rating: minRating,
+        max_price: maxPrice,
+        sort_by: sortBy,
+        limit,
+        offset,
+      },
+      {
+        search_text: searchText || null,
+        category_filter: category,
+        min_rating: minRating,
+        max_price: maxPrice,
+        sort_by: sortBy,
+        p_limit: limit,
+        p_offset: offset,
+      },
+      {
+        p_query: searchText || null,
+        p_category: category,
+        p_min_rating: minRating,
+        p_max_price: maxPrice,
+        p_sort_by: sortBy,
+        p_limit: limit,
+        p_offset: offset,
+      },
+    ];
+
+    let rowsRaw: unknown[] | null = null;
+    let lastError: any = null;
+
+    for (const payload of payloadAttempts) {
+      const { data, error } = await supabase.rpc('search_and_filter_destinations', payload as Record<string, unknown>);
+
+      if (!error) {
+        rowsRaw = Array.isArray(data) ? data : [];
+        lastError = null;
+        break;
+      }
+
+      lastError = error;
+      const message = String((error as any)?.message ?? '').toLowerCase();
+      const canRetryDifferentSignature =
+        message.includes('search_and_filter_destinations') &&
+        (message.includes('function') || message.includes('does not exist'));
+
+      if (!canRetryDifferentSignature) {
+        throw error;
+      }
+    }
+
+    if (lastError) throw lastError;
+
+    const seenIds = new Set<string>();
+    const rows: SearchFilterDestinationRow[] = [];
+
+    for (const item of rowsRaw ?? []) {
+      if (!item || typeof item !== 'object') continue;
+
+      const normalized = normalizePersonalizedRecommendationRow(item as Record<string, unknown>);
+      if (!normalized) continue;
+
+      const dedupeKey = String(normalized.id);
+      if (seenIds.has(dedupeKey)) continue;
+
+      seenIds.add(dedupeKey);
+      rows.push(normalized);
+    }
+
+    return rows;
   },
 
   async getDestinationById(destinationId: string) {
@@ -618,30 +1193,50 @@ export const destinationService = {
 
   async searchDestinations(query: string) {
     const trimmed = query.trim();
-    const orClause = buildKeywordOrClause(trimmed);
+    const result = await runDestinationQueryWithLocalizedFallback<DestinationDiscoveryRow>(
+      async ({ selectColumns, supportsLocalizedColumns }) => {
+        const orClause = buildKeywordOrClause(trimmed, supportsLocalizedColumns);
 
-    const { data, error } = await supabase
-      .from('destinations')
-      .select('*, categories(name)')
-      .or(orClause)
-      .order('name', { ascending: true });
+        return supabase
+          .from('destinations')
+          .select(selectColumns)
+          .or(orClause)
+          .order('name', { ascending: true });
+      }
+    );
 
-    if (error) throw error;
-    return data;
+    return result.rows;
   },
 
-  async searchDestinationsByAI(queryText: string): Promise<DestinationDiscoveryRow[]> {
+  async searchDestinationsByAI(
+    queryText: string,
+    options: DestinationSearchLanguageOptions = {}
+  ): Promise<DestinationSmartSearchResult> {
     const trimmed = queryText.trim();
-    if (!trimmed) return [];
+    const targetLanguage = normalizeSmartSearchLanguage(options.currentLanguage);
 
-    const destinationSelect =
-      'id, name, location, description, price, rating, image_url, category_id, latitude, longitude, created_at, categories(name)';
+    if (!trimmed) {
+      return {
+        rows: [],
+        localizationSource: 'default',
+        targetLanguage,
+      };
+    }
+
+    const finalizeRows = async (rows: DestinationDiscoveryRow[], usedLocalizedColumns: boolean) =>
+      buildSmartSearchResult(rows, targetLanguage, usedLocalizedColumns);
 
     try {
-      const intent = await extractTravelSearchIntent(trimmed);
+      const intent = await extractTravelSearchIntent(trimmed, {
+        currentLanguage: targetLanguage,
+      });
 
       if (!intent.is_travel_related) {
-        return [];
+        return {
+          rows: [],
+          localizationSource: 'default',
+          targetLanguage,
+        };
       }
 
       const hintCategoryIds = await resolveCategoryIdsFromHints(intent.category_hints);
@@ -657,63 +1252,71 @@ export const destinationService = {
           ? intentCategoryIds
           : mergedCategoryIds;
 
-      const orClause = buildAiGuidedOrClause({
-        aiSuggestedPlaces: intent.ai_suggested_places,
-        categoryIds,
-        rawQuery: trimmed,
-      });
+      const strictQueryResult = await runDestinationQueryWithLocalizedFallback<DestinationDiscoveryRow>(
+        async ({ selectColumns, supportsLocalizedColumns }) => {
+          const orClause = buildAiGuidedOrClause({
+            aiSuggestedPlaces: intent.ai_suggested_places,
+            categoryIds,
+            rawQuery: trimmed,
+            includeLocalizedColumns: supportsLocalizedColumns,
+          });
 
-      if (!orClause) {
-        return [];
-      }
+          if (!orClause) {
+            return { data: [], error: null };
+          }
 
-      let guidedQuery = supabase
-        .from('destinations')
-        .select(destinationSelect)
-        .or(orClause);
+          let guidedQuery = supabase
+            .from('destinations')
+            .select(selectColumns)
+            .or(orClause);
 
-      if (intent.is_free === true) {
-        guidedQuery = guidedQuery.eq('price', 0);
-      } else if (intent.is_free === false) {
-        guidedQuery = guidedQuery.gt('price', 0);
-      }
+          if (intent.is_free === true) {
+            guidedQuery = guidedQuery.eq('price', 0);
+          } else if (intent.is_free === false) {
+            guidedQuery = guidedQuery.gt('price', 0);
+          }
 
-      const { data: strictRowsRaw, error: strictError } = await guidedQuery
-        .order('rating', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(80);
+          return guidedQuery
+            .order('rating', { ascending: false })
+            .order('created_at', { ascending: false })
+            .limit(80);
+        }
+      );
 
-      if (strictError) throw strictError;
-
-      const strictRows = (strictRowsRaw ?? []) as DestinationDiscoveryRow[];
+      const strictRows = strictQueryResult.rows;
       if (strictRows.length > 0) {
-        return rerankByIntent(strictRows, trimmed);
+        return finalizeRows(rerankByIntent(strictRows, trimmed), strictQueryResult.usedLocalizedColumns);
       }
 
-      const fallbackKeywordClause = buildKeywordOrClause(trimmed);
-      if (!fallbackKeywordClause) {
-        return [];
-      }
+      const fallbackQueryResult = await runDestinationQueryWithLocalizedFallback<DestinationDiscoveryRow>(
+        async ({ selectColumns, supportsLocalizedColumns }) => {
+          const fallbackKeywordClause = buildKeywordOrClause(trimmed, supportsLocalizedColumns);
+          if (!fallbackKeywordClause) {
+            return { data: [], error: null };
+          }
 
-      let fallbackQuery = supabase
-        .from('destinations')
-        .select(destinationSelect)
-        .or(fallbackKeywordClause);
+          let fallbackQuery = supabase
+            .from('destinations')
+            .select(selectColumns)
+            .or(fallbackKeywordClause);
 
-      if (intent.is_free === true) {
-        fallbackQuery = fallbackQuery.eq('price', 0);
-      } else if (intent.is_free === false) {
-        fallbackQuery = fallbackQuery.gt('price', 0);
-      }
+          if (intent.is_free === true) {
+            fallbackQuery = fallbackQuery.eq('price', 0);
+          } else if (intent.is_free === false) {
+            fallbackQuery = fallbackQuery.gt('price', 0);
+          }
 
-      const { data: fallbackRowsRaw, error: fallbackError } = await fallbackQuery
-        .order('rating', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(60);
+          return fallbackQuery
+            .order('rating', { ascending: false })
+            .order('created_at', { ascending: false })
+            .limit(60);
+        }
+      );
 
-      if (fallbackError) throw fallbackError;
-
-      return rerankByIntent((fallbackRowsRaw ?? []) as DestinationDiscoveryRow[], trimmed);
+      return finalizeRows(
+        rerankByIntent(fallbackQueryResult.rows, trimmed),
+        fallbackQueryResult.usedLocalizedColumns
+      );
     } catch (intentErr: any) {
       console.warn('searchDestinationsByAI strict intent path failed, fallback to embeddings:', intentErr?.message ?? intentErr);
 
@@ -736,7 +1339,7 @@ export const destinationService = {
 
         if (orderedIds.length === 0) {
           const fallback = await this.searchDestinations(trimmed);
-          return (fallback ?? []) as DestinationDiscoveryRow[];
+          return finalizeRows((fallback ?? []) as DestinationDiscoveryRow[], false);
         }
 
         const similarityById = new Map<string, number | null>();
@@ -750,15 +1353,16 @@ export const destinationService = {
           similarityById.set(id, similarity);
         }
 
-        const { data: destinationRows, error: destinationError } = await supabase
-          .from('destinations')
-          .select(destinationSelect)
-          .in('id', orderedIds);
-
-        if (destinationError) throw destinationError;
+        const destinationLookup = await runDestinationQueryWithLocalizedFallback<DestinationDiscoveryRow>(
+          async ({ selectColumns }) =>
+            supabase
+              .from('destinations')
+              .select(selectColumns)
+              .in('id', orderedIds)
+        );
 
         const rowById = new Map<string, DestinationDiscoveryRow>();
-        for (const row of destinationRows ?? []) {
+        for (const row of destinationLookup.rows ?? []) {
           const id = String((row as any)?.id ?? '').trim();
           if (!id) continue;
           rowById.set(id, row as DestinationDiscoveryRow);
@@ -783,11 +1387,11 @@ export const destinationService = {
 
         if (orderedRows.length === 0) {
           if (keywordRows.length > 0) {
-            return rerankByIntent(keywordRows, trimmed);
+            return finalizeRows(rerankByIntent(keywordRows, trimmed), false);
           }
 
           const fallback = await this.searchDestinations(trimmed);
-          return (fallback ?? []) as DestinationDiscoveryRow[];
+          return finalizeRows((fallback ?? []) as DestinationDiscoveryRow[], false);
         }
 
         let blendedRows = orderedRows;
@@ -816,11 +1420,14 @@ export const destinationService = {
           blendedRows = Array.from(mergedById.values());
         }
 
-        return rerankByIntent(blendedRows, trimmed);
+        return finalizeRows(
+          rerankByIntent(blendedRows, trimmed),
+          destinationLookup.usedLocalizedColumns
+        );
       } catch (err: any) {
         console.warn('searchDestinationsByAI fallback to keyword search:', err?.message ?? err);
         const fallback = await this.searchDestinations(trimmed);
-        return (fallback ?? []) as DestinationDiscoveryRow[];
+        return finalizeRows((fallback ?? []) as DestinationDiscoveryRow[], false);
       }
     }
   },
@@ -908,11 +1515,16 @@ export const destinationService = {
     }
 
     if (sort === 'top-rated') {
-      query = query.order('rating', { ascending: false }).order('name', { ascending: true });
+      query = query
+        .order('rating', { ascending: false })
+        .order('name', { ascending: true })
+        .order('id', { ascending: true });
     } else if (sort === 'a-z') {
-      query = query.order('name', { ascending: true });
+      query = query.order('name', { ascending: true }).order('id', { ascending: true });
     } else {
-      query = query.order(search ? 'rating' : 'created_at', { ascending: false });
+      query = query
+        .order(search ? 'rating' : 'created_at', { ascending: false })
+        .order('id', { ascending: true });
     }
 
     query = query.range(offset, offset + limit - 1);
@@ -928,9 +1540,14 @@ export const destinationService = {
     const priceFilter = filters.priceFilter ?? 'all';
     const limit = Math.max(1, Math.min(100, filters.limit ?? 40));
     const offset = Math.max(0, filters.offset ?? 0);
+    const currentUserId = await getCurrentUserIdSafe();
 
-    const buildQuery = (useRatingColumn: boolean) => {
-      let query = supabase.from('events').select('*').eq('approval_status', 'approved');
+    const buildQuery = (useRatingColumn: boolean, useApprovalFilter: boolean) => {
+      let query = supabase.from('events').select('*');
+
+      if (useApprovalFilter && !currentUserId) {
+        query = query.eq('approval_status', 'approved');
+      }
 
       if (search) {
         query = query.or(`title.ilike.%${search}%,location.ilike.%${search}%`);
@@ -963,16 +1580,27 @@ export const destinationService = {
       return query.range(offset, offset + limit - 1);
     };
 
-    let result = await buildQuery(true);
-    if (result.error) {
-      const msg = String((result.error as any)?.message ?? '').toLowerCase();
-      const shouldRetryWithoutRating = msg.includes('rating') && msg.includes('does not exist');
+    let useRatingColumn = true;
+    let useApprovalFilter = true;
+    let result = await buildQuery(useRatingColumn, useApprovalFilter);
 
-      if (!shouldRetryWithoutRating) {
-        throw result.error;
+    for (let attempt = 0; result.error && attempt < 2; attempt += 1) {
+      const missingRating = useRatingColumn && isMissingColumnError(result.error, 'rating');
+      const missingApprovalStatus = useApprovalFilter && isMissingColumnError(result.error, 'approval_status');
+
+      if (!missingRating && !missingApprovalStatus) {
+        break;
       }
 
-      result = await buildQuery(false);
+      if (missingRating) {
+        useRatingColumn = false;
+      }
+
+      if (missingApprovalStatus) {
+        useApprovalFilter = false;
+      }
+
+      result = await buildQuery(useRatingColumn, useApprovalFilter);
     }
 
     if (result.error) throw result.error;

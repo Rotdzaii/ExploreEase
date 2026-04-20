@@ -1,5 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -68,12 +68,59 @@ if (rawSupabaseUrl && !isValidHttpUrl(rawSupabaseUrl)) {
 const supabaseUrl: string = isValidHttpUrl(rawSupabaseUrl) ? rawSupabaseUrl! : 'https://example.invalid';
 const supabaseAnonKey: string = rawSupabaseAnonKey ?? 'missing-anon-key';
 
+const getWebStorage = () => {
+  if (Platform.OS !== 'web') return null;
+  try {
+    if (typeof globalThis === 'undefined' || !('localStorage' in globalThis)) return null;
+    return globalThis.localStorage;
+  } catch {
+    return null;
+  }
+};
+
+const secureAuthStorage = {
+  getItem: async (key: string): Promise<string | null> => {
+    if (Platform.OS === 'web') {
+      const webStorage = getWebStorage();
+      return webStorage ? webStorage.getItem(key) : null;
+    }
+
+    try {
+      return await SecureStore.getItemAsync(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem: async (key: string, value: string): Promise<void> => {
+    if (Platform.OS === 'web') {
+      const webStorage = getWebStorage();
+      if (webStorage) {
+        webStorage.setItem(key, value);
+      }
+      return;
+    }
+
+    await SecureStore.setItemAsync(key, value);
+  },
+  removeItem: async (key: string): Promise<void> => {
+    if (Platform.OS === 'web') {
+      const webStorage = getWebStorage();
+      if (webStorage) {
+        webStorage.removeItem(key);
+      }
+      return;
+    }
+
+    await SecureStore.deleteItemAsync(key);
+  },
+};
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   global: {
     fetch: fetchWithTimeout,
   },
   auth: {
-    storage: Platform.OS !== 'web' ? AsyncStorage : undefined,
+    storage: secureAuthStorage,
     flowType: 'pkce',
     autoRefreshToken: true,
     persistSession: true,

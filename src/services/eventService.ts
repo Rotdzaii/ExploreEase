@@ -49,7 +49,6 @@ export type CreateEventInput = {
   price?: number;
   image_url?: string | null;
   description?: string | null;
-  status?: EventStatus;
 };
 
 export type UpdateEventInput = {
@@ -107,6 +106,21 @@ const normalizeMoney = (value: number | undefined): number => {
   return Number(value.toFixed(2));
 };
 
+const getCurrentUserIdSafe = async (): Promise<string | null> => {
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) return null;
+    return data.user?.id ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const isMissingColumnError = (error: unknown, columnName: string) => {
+  const message = String((error as any)?.message ?? '').toLowerCase();
+  return message.includes('does not exist') && message.includes(columnName.toLowerCase());
+};
+
 export const getEventStatusByTime = (
   startTimeValue: string | Date,
   endTimeValue: string | Date,
@@ -129,15 +143,28 @@ const withLiveStatus = (row: EventRow): EventRow => ({
 export const eventService = {
   async getDistinctCategories(limit: number = 100): Promise<string[]> {
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 100;
+    const currentUserId = await getCurrentUserIdSafe();
 
-    const { data, error } = await supabase
-      .from('events')
-      .select('category')
-      .eq('approval_status', 'approved')
-      .order('category', { ascending: true })
-      .limit(safeLimit);
+    const buildQuery = (useApprovalFilter: boolean) => {
+      let query = supabase
+        .from('events')
+        .select('category');
 
-    if (error) throw error;
+      if (useApprovalFilter && !currentUserId) {
+        query = query.eq('approval_status', 'approved');
+      }
+
+      return query.order('category', { ascending: true }).limit(safeLimit);
+    };
+
+    let result = await buildQuery(true);
+    if (result.error && isMissingColumnError(result.error, 'approval_status')) {
+      result = await buildQuery(false);
+    }
+
+    if (result.error) throw result.error;
+
+    const data = result.data;
 
     const seen = new Set<string>();
     const categories: string[] = [];
@@ -166,71 +193,85 @@ export const eventService = {
   },
 
   async getEvents(filters: GetEventsFilters = {}): Promise<EventRow[]> {
-    let query = supabase.from('events').select('*').eq('approval_status', 'approved');
+    const currentUserId = await getCurrentUserIdSafe();
 
-    const search = filters.search?.trim();
-    if (search) {
-      query = query.or(`title.ilike.%${search}%,location.ilike.%${search}%`);
-    }
+    const buildQuery = (useApprovalFilter: boolean) => {
+      let query = supabase.from('events').select('*');
 
-    const category = filters.category?.trim();
-    if (category) {
-      query = query.eq('category', category);
-    }
-
-    const location = filters.location?.trim();
-    if (location) {
-      query = query.ilike('location', `%${location}%`);
-    }
-
-    if (filters.status && filters.status !== 'all') {
-      const nowIso = new Date().toISOString();
-      if (filters.status === 'incoming') {
-        query = query.gt('start_time', nowIso);
-      } else if (filters.status === 'ongoing') {
-        query = query.lte('start_time', nowIso).gte('end_time', nowIso);
-      } else {
-        query = query.lt('end_time', nowIso);
+      if (useApprovalFilter && !currentUserId) {
+        query = query.eq('approval_status', 'approved');
       }
+
+      const search = filters.search?.trim();
+      if (search) {
+        query = query.or(`title.ilike.%${search}%,location.ilike.%${search}%`);
+      }
+
+      const category = filters.category?.trim();
+      if (category) {
+        query = query.eq('category', category);
+      }
+
+      const location = filters.location?.trim();
+      if (location) {
+        query = query.ilike('location', `%${location}%`);
+      }
+
+      if (filters.status && filters.status !== 'all') {
+        const nowIso = new Date().toISOString();
+        if (filters.status === 'incoming') {
+          query = query.gt('start_time', nowIso);
+        } else if (filters.status === 'ongoing') {
+          query = query.lte('start_time', nowIso).gte('end_time', nowIso);
+        } else {
+          query = query.lt('end_time', nowIso);
+        }
+      }
+
+      if (filters.freeOnly) {
+        query = query.eq('price', 0);
+      }
+
+      if (typeof filters.minPrice === 'number' && !Number.isNaN(filters.minPrice)) {
+        query = query.gte('price', filters.minPrice);
+      }
+
+      if (typeof filters.maxPrice === 'number' && !Number.isNaN(filters.maxPrice)) {
+        query = query.lte('price', filters.maxPrice);
+      }
+
+      if (filters.startFrom) {
+        query = query.gte('start_time', toIsoString(filters.startFrom));
+      }
+
+      if (filters.endTo) {
+        query = query.lte('end_time', toIsoString(filters.endTo));
+      }
+
+      if (filters.creatorId) {
+        query = query.eq('creator_id', filters.creatorId);
+      }
+
+      const orderBy = filters.orderBy ?? 'start_time';
+      const ascending = filters.ascending ?? true;
+      query = query.order(orderBy, { ascending });
+
+      if (typeof filters.limit === 'number' && Number.isFinite(filters.limit) && filters.limit > 0) {
+        const offset = Math.max(filters.offset ?? 0, 0);
+        query = query.range(offset, offset + filters.limit - 1);
+      }
+
+      return query;
+    };
+
+    let result = await buildQuery(true);
+    if (result.error && isMissingColumnError(result.error, 'approval_status')) {
+      result = await buildQuery(false);
     }
 
-    if (filters.freeOnly) {
-      query = query.eq('price', 0);
-    }
+    if (result.error) throw result.error;
 
-    if (typeof filters.minPrice === 'number' && !Number.isNaN(filters.minPrice)) {
-      query = query.gte('price', filters.minPrice);
-    }
-
-    if (typeof filters.maxPrice === 'number' && !Number.isNaN(filters.maxPrice)) {
-      query = query.lte('price', filters.maxPrice);
-    }
-
-    if (filters.startFrom) {
-      query = query.gte('start_time', toIsoString(filters.startFrom));
-    }
-
-    if (filters.endTo) {
-      query = query.lte('end_time', toIsoString(filters.endTo));
-    }
-
-    if (filters.creatorId) {
-      query = query.eq('creator_id', filters.creatorId);
-    }
-
-    const orderBy = filters.orderBy ?? 'start_time';
-    const ascending = filters.ascending ?? true;
-    query = query.order(orderBy, { ascending });
-
-    if (typeof filters.limit === 'number' && Number.isFinite(filters.limit) && filters.limit > 0) {
-      const offset = Math.max(filters.offset ?? 0, 0);
-      query = query.range(offset, offset + filters.limit - 1);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    return ((data ?? []) as EventRow[]).map(withLiveStatus);
+    return ((result.data ?? []) as EventRow[]).map(withLiveStatus);
   },
 
   async createEventForCurrentUser(input: CreateEventInput): Promise<EventRow> {
@@ -251,7 +292,7 @@ export const eventService = {
       throw new Error('end_time must be greater than start_time');
     }
 
-    const status = input.status ?? getEventStatusByTime(startTimeIso, endTimeIso);
+    const status = getEventStatusByTime(startTimeIso, endTimeIso);
     const description = typeof input.description === 'string' ? input.description.trim() : '';
 
     const payload = {

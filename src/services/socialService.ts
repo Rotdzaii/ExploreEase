@@ -97,6 +97,12 @@ export type ConversationMessage = {
   createdAt: string;
 };
 
+export type FollowStats = {
+  isFollowing: boolean;
+  followerCount: number;
+  followingCount: number;
+};
+
 const FALLBACK_NAME = 'Traveler';
 
 const normalizeName = (raw: unknown, fallbackId?: string): string => {
@@ -111,7 +117,7 @@ const normalizeName = (raw: unknown, fallbackId?: string): string => {
   return FALLBACK_NAME;
 };
 
-const toUniqueIds = (ids: Array<string | null | undefined>) => {
+const toUniqueIds = (ids: (string | null | undefined)[]) => {
   return Array.from(new Set(ids.map((value) => String(value ?? '').trim()).filter(Boolean)));
 };
 
@@ -294,6 +300,137 @@ const buildConversationSummaries = async (
   return summaries.sort((a, b) => compareIsoDesc(a.lastMessageAt, b.lastMessageAt));
 };
 
+const isUniqueViolationError = (error: unknown) => {
+  const code = String((error as any)?.code ?? '').trim();
+  const message = String((error as any)?.message ?? '').toLowerCase();
+  return code === '23505' || message.includes('duplicate key');
+};
+
+const getFollowStatsInternal = async (currentUserId: string, targetUserId: string): Promise<FollowStats> => {
+  const safeTargetUserId = String(targetUserId ?? '').trim();
+  if (!safeTargetUserId) throw new Error('Missing user ID');
+
+  const [relationRes, followerCountRes, followingCountRes] = await Promise.all([
+    supabase
+      .from('follows')
+      .select('follower_id')
+      .eq('follower_id', currentUserId)
+      .eq('following_id', safeTargetUserId)
+      .maybeSingle(),
+    supabase
+      .from('follows')
+      .select('following_id', { head: true, count: 'exact' })
+      .eq('following_id', safeTargetUserId),
+    supabase
+      .from('follows')
+      .select('follower_id', { head: true, count: 'exact' })
+      .eq('follower_id', safeTargetUserId),
+  ]);
+
+  if (relationRes.error) throw relationRes.error;
+  if (followerCountRes.error) throw followerCountRes.error;
+  if (followingCountRes.error) throw followingCountRes.error;
+
+  return {
+    isFollowing: !!relationRes.data,
+    followerCount: typeof followerCountRes.count === 'number' ? followerCountRes.count : 0,
+    followingCount: typeof followingCountRes.count === 'number' ? followingCountRes.count : 0,
+  };
+};
+
+const findDirectConversationId = async (currentUserId: string, partnerUserId: string): Promise<string | null> => {
+  const { data: ownParticipantRows, error: ownParticipantsError } = await supabase
+    .from('conversation_participants')
+    .select('conversation_id')
+    .eq('user_id', currentUserId)
+    .limit(240);
+
+  if (ownParticipantsError) throw ownParticipantsError;
+
+  const conversationIds = toUniqueIds((ownParticipantRows ?? []).map((row: any) => row?.conversation_id));
+  if (conversationIds.length === 0) return null;
+
+  const { data: directConversationRows, error: directConversationError } = await supabase
+    .from('conversations')
+    .select('id, type, event_id, created_at')
+    .in('id', conversationIds)
+    .eq('type', 'direct');
+
+  if (directConversationError) throw directConversationError;
+
+  const directIds = toUniqueIds((directConversationRows ?? []).map((row: any) => row?.id));
+  if (directIds.length === 0) return null;
+
+  const { data: participantRows, error: participantError } = await supabase
+    .from('conversation_participants')
+    .select('conversation_id, user_id, joined_at')
+    .in('conversation_id', directIds);
+
+  if (participantError) throw participantError;
+
+  const participantsByConversation = new Map<string, string[]>();
+  for (const row of (participantRows ?? []) as ConversationParticipantRow[]) {
+    const conversationId = String(row.conversation_id ?? '').trim();
+    const userId = String(row.user_id ?? '').trim();
+    if (!conversationId || !userId) continue;
+
+    const current = participantsByConversation.get(conversationId) ?? [];
+    current.push(userId);
+    participantsByConversation.set(conversationId, current);
+  }
+
+  for (const [conversationId, participantIds] of participantsByConversation.entries()) {
+    const uniqueParticipantIds = toUniqueIds(participantIds);
+    if (uniqueParticipantIds.length !== 2) continue;
+
+    if (uniqueParticipantIds.includes(currentUserId) && uniqueParticipantIds.includes(partnerUserId)) {
+      return conversationId;
+    }
+  }
+
+  return null;
+};
+
+const getOrCreateDirectConversationInternal = async (currentUserId: string, partnerUserId: string): Promise<string> => {
+  const safePartnerUserId = String(partnerUserId ?? '').trim();
+  if (!safePartnerUserId) throw new Error('Missing partner user ID');
+  if (safePartnerUserId === currentUserId) throw new Error('Cannot create a direct conversation with yourself');
+
+  const existingConversationId = await findDirectConversationId(currentUserId, safePartnerUserId);
+  if (existingConversationId) return existingConversationId;
+
+  const { data: createdConversation, error: createConversationError } = await supabase
+    .from('conversations')
+    .insert({
+      type: 'direct',
+      event_id: null,
+    })
+    .select('id')
+    .single();
+
+  if (createConversationError) throw createConversationError;
+
+  const conversationId = String((createdConversation as any)?.id ?? '').trim();
+  if (!conversationId) throw new Error('Unable to create direct conversation');
+
+  const { error: participantsError } = await supabase
+    .from('conversation_participants')
+    .insert([
+      { conversation_id: conversationId, user_id: currentUserId },
+      { conversation_id: conversationId, user_id: safePartnerUserId },
+    ]);
+
+  if (participantsError) {
+    if (!isUniqueViolationError(participantsError)) throw participantsError;
+
+    const dedupConversationId = await findDirectConversationId(currentUserId, safePartnerUserId);
+    if (dedupConversationId) return dedupConversationId;
+    throw participantsError;
+  }
+
+  return conversationId;
+};
+
 export const socialService = {
   async getActivityFeed(limit: number = 40): Promise<SocialFeedItem[]> {
     await ensureAuthenticatedUserId();
@@ -336,6 +473,87 @@ export const socialService = {
       };
     });
   },
+
+    async getFollowStats(targetUserId: string): Promise<FollowStats> {
+      const currentUserId = await ensureAuthenticatedUserId();
+      return getFollowStatsInternal(currentUserId, targetUserId);
+    },
+
+    async followUser(targetUserId: string): Promise<FollowStats> {
+      const currentUserId = await ensureAuthenticatedUserId();
+      const safeTargetUserId = String(targetUserId ?? '').trim();
+
+      if (!safeTargetUserId) throw new Error('Missing user ID');
+      if (safeTargetUserId === currentUserId) throw new Error('Cannot follow yourself');
+
+      const { error } = await supabase
+        .from('follows')
+        .insert({
+          follower_id: currentUserId,
+          following_id: safeTargetUserId,
+        });
+
+      if (error && !isUniqueViolationError(error)) throw error;
+
+      const { error: activityError } = await supabase.from('activities').insert({
+        user_id: currentUserId,
+        action_type: 'follow',
+        target_id: safeTargetUserId,
+        target_type: 'user',
+      });
+
+      if (activityError) {
+        console.warn('followUser activity insert failed:', activityError.message);
+      }
+
+      return getFollowStatsInternal(currentUserId, safeTargetUserId);
+    },
+
+    async unfollowUser(targetUserId: string): Promise<FollowStats> {
+      const currentUserId = await ensureAuthenticatedUserId();
+      const safeTargetUserId = String(targetUserId ?? '').trim();
+
+      if (!safeTargetUserId) throw new Error('Missing user ID');
+      if (safeTargetUserId === currentUserId) {
+        return getFollowStatsInternal(currentUserId, safeTargetUserId);
+      }
+
+      const { error } = await supabase
+        .from('follows')
+        .delete()
+        .eq('follower_id', currentUserId)
+        .eq('following_id', safeTargetUserId);
+
+      if (error) throw error;
+
+      return getFollowStatsInternal(currentUserId, safeTargetUserId);
+    },
+
+    async resolveConversationIdFromRouteParam(routeParam: string): Promise<string> {
+      const currentUserId = await ensureAuthenticatedUserId();
+      const safeRouteParam = String(routeParam ?? '').trim();
+      if (!safeRouteParam) throw new Error('Missing conversation or user ID');
+
+      const membershipRes = await supabase
+        .from('conversation_participants')
+        .select('conversation_id')
+        .eq('conversation_id', safeRouteParam)
+        .eq('user_id', currentUserId)
+        .maybeSingle();
+
+      if (membershipRes.error) {
+        const errorCode = String((membershipRes.error as any)?.code ?? '').trim();
+        if (errorCode !== '22P02') {
+          throw membershipRes.error;
+        }
+      }
+
+      if (membershipRes.data?.conversation_id) {
+        return safeRouteParam;
+      }
+
+      return getOrCreateDirectConversationInternal(currentUserId, safeRouteParam);
+    },
 
   async getConversations(): Promise<ConversationSummary[]> {
     const currentUserId = await ensureAuthenticatedUserId();

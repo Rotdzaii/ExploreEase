@@ -1,7 +1,8 @@
 import { EditEventForm, type EventEditData } from '@/components/events/EditEventForm';
+import ShareBottomSheet from '@/components/events/ShareBottomSheet';
 import { TimeOfDayToggle } from '@/components/home/TimeOfDayToggle';
 import { YouMightAlsoLike, type YouMightAlsoLikeItem } from '@/components/home/YouMightAlsoLike';
-import { ModerationModal, RatingDistribution, ReviewCard, ReviewForm } from '@/components/reviews';
+import { RatingDistribution, ReviewCard, ReviewForm } from '@/components/reviews';
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useNetwork } from '@/hooks/useNetwork';
 import { useCurrency } from '@/src/context/currency';
@@ -27,6 +28,7 @@ import {
     ActivityIndicator,
     Alert,
     ImageBackground,
+    Keyboard,
     Modal,
     Platform,
     Pressable,
@@ -159,6 +161,21 @@ const toReviewImageUrls = (value: unknown): string[] => {
   return [];
 };
 
+const releaseOverlayTriggerFocus = () => {
+  Keyboard.dismiss();
+
+  if (Platform.OS !== 'web') return;
+
+  try {
+    const activeElement = (globalThis as any)?.document?.activeElement as { blur?: () => void } | null | undefined;
+    if (activeElement && typeof activeElement.blur === 'function') {
+      activeElement.blur();
+    }
+  } catch {
+    // Ignore focus release failures on unsupported environments.
+  }
+};
+
 export default function EventDetailScreen() {
   const { isDark } = useTheme();
   const { t, language } = useI18n();
@@ -195,10 +212,8 @@ export default function EventDetailScreen() {
   const [helpfulPendingId, setHelpfulPendingId] = useState<string | null>(null);
   const [replyDraftByReview, setReplyDraftByReview] = useState<Record<string, string>>({});
   const [submittingReplyId, setSubmittingReplyId] = useState<string | null>(null);
-  const [reportModalVisible, setReportModalVisible] = useState(false);
-  const [reportReviewId, setReportReviewId] = useState<string | null>(null);
-  const [reportReason, setReportReason] = useState('');
-  const [submittingReport, setSubmittingReport] = useState(false);
+  const [reportingReviewId, setReportingReviewId] = useState<string | null>(null);
+  const [reportedReviewIds, setReportedReviewIds] = useState<Record<string, boolean>>({});
 
   const [isWritingReview, setIsWritingReview] = useState(false);
   const [draftRating, setDraftRating] = useState<number>(5);
@@ -217,6 +232,7 @@ export default function EventDetailScreen() {
   const [isNoTripsModalOpen, setIsNoTripsModalOpen] = useState(false);
   const [creatingTripAndAdding, setCreatingTripAndAdding] = useState(false);
   const [isTripPickerModalOpen, setIsTripPickerModalOpen] = useState(false);
+  const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
   const colors = useMemo(
     () => ({
@@ -359,6 +375,7 @@ export default function EventDetailScreen() {
   }, [t]);
 
   const openAddToTrip = useCallback(() => {
+    releaseOverlayTriggerFocus();
     setSelectedTripRow(null);
     setSelectedTripDay(1);
     setIsAddToTripOpen(true);
@@ -501,6 +518,7 @@ export default function EventDetailScreen() {
     if (!ok) return;
 
     const rows = await loadTrips();
+    releaseOverlayTriggerFocus();
 
     if ((rows ?? []).length > 0) {
       if (Platform.OS === 'web') {
@@ -691,6 +709,12 @@ export default function EventDetailScreen() {
   useEffect(() => {
     void refreshReviews();
   }, [refreshReviews]);
+
+  useEffect(() => {
+    setReportedReviewIds({});
+    setReportingReviewId(null);
+    setShareSheetVisible(false);
+  }, [eventId]);
 
   useEffect(() => {
     if (!eventId) return;
@@ -949,59 +973,45 @@ export default function EventDetailScreen() {
     }
   }, [addNotification, currentUserId, helpfulPendingId, promptLogin, t]);
 
-  const openReportModal = useCallback((reviewId: string) => {
-    setReportReviewId(reviewId);
-    setReportReason('');
-    setReportModalVisible(true);
-  }, []);
-
-  const submitReviewReport = useCallback(async () => {
-    if (!reportReviewId) return;
+  const handleReportReview = useCallback(async (reviewId: string, reason: string = 'Inappropriate content') => {
+    const normalizedReviewId = String(reviewId ?? '').trim();
+    if (!normalizedReviewId) return;
 
     if (!currentUserId) {
-      setReportModalVisible(false);
       promptLogin(t('review.auth.reportRequired'));
       return;
     }
 
-    const reason = reportReason.trim();
-    if (!reason) {
-      addNotification({
-        message: t('review.validation.reportReasonRequired'),
-        type: 'warning',
-        durationMs: 3200,
-      });
+    if (reportedReviewIds[normalizedReviewId] || reportingReviewId === normalizedReviewId) {
       return;
     }
 
-    setSubmittingReport(true);
+    const normalizedReason = String(reason ?? '').trim() || 'Inappropriate content';
+
+    setReportingReviewId(normalizedReviewId);
     try {
       await eventReviewService.reportReview({
-        reviewId: reportReviewId,
-        reason,
+        reviewId: normalizedReviewId,
+        reason: normalizedReason,
       });
 
-      addNotification({
-        message: t('review.success.reportEvent'),
-        type: 'success',
-        durationMs: 2600,
-      });
-
-      setReportModalVisible(false);
-      setReportReason('');
-      setReportReviewId(null);
+      setReportedReviewIds((prev) => ({
+        ...prev,
+        [normalizedReviewId]: true,
+      }));
+      Alert.alert('Thành công', 'Đã gửi báo cáo vi phạm');
     } catch (error: any) {
-      console.warn('submitReviewReport(event) failed:', error);
-      const reason = String(error?.message ?? '').trim() || t('review.error.genericTryAgain');
+      console.warn('handleReportReview(event) failed:', error);
+      const reasonText = String(error?.message ?? '').trim() || t('review.error.genericTryAgain');
       addNotification({
-        message: t('review.error.reportFailed', { reason }),
+        message: t('review.error.reportFailed', { reason: reasonText }),
         type: 'error',
         durationMs: 3600,
       });
     } finally {
-      setSubmittingReport(false);
+      setReportingReviewId(null);
     }
-  }, [addNotification, currentUserId, promptLogin, reportReason, reportReviewId, t]);
+  }, [addNotification, currentUserId, promptLogin, reportedReviewIds, reportingReviewId, t]);
 
   const submitReplyToReview = useCallback(async (reviewId: string) => {
     if (!canReplyToReviews) {
@@ -1206,6 +1216,10 @@ export default function EventDetailScreen() {
   const onSubmitEdit = useCallback(
     async (formData: EventEditData) => {
       if (!event) return;
+      if (!isOwner) {
+        Alert.alert('Không có quyền', 'Bạn không có quyền chỉnh sửa sự kiện này');
+        return;
+      }
 
       const start = combineLocalDateTime(formData.startDate, formData.startTime);
       const end = combineLocalDateTime(formData.endDate, formData.endTime);
@@ -1249,12 +1263,16 @@ export default function EventDetailScreen() {
         Alert.alert(t('events.form.error.updateFailedTitle'), err?.message ?? t('events.form.error.updateFailedMessage'));
       }
     },
-    [addNotification, event, fetchEvent, t]
+    [addNotification, event, fetchEvent, isOwner, t]
   );
 
   const onDeleteEvent = useCallback(
     async (id: string) => {
       if (!event) return;
+      if (!isOwner) {
+        Alert.alert('Không có quyền', 'Bạn không có quyền xóa sự kiện này');
+        return;
+      }
 
       Alert.alert(
         t('events.form.deleteConfirmTitle'),
@@ -1278,24 +1296,28 @@ export default function EventDetailScreen() {
         ]
       );
     },
-    [event, t]
+    [event, isOwner, t]
   );
 
-  const onShareEvent = useCallback(async () => {
+  const onShareEvent = useCallback(async (shareText?: string) => {
     if (!event) return;
 
-    const message = t('event.detail.shareMessage', {
+    const baseMessage = t('event.detail.shareMessage', {
       title: event.title,
       location: event.location,
       start: formatEventDateTimeText(event.start_time),
       description: event.description?.trim() ? event.description.trim() : t('event.detail.noDescription'),
     });
 
+    const customText = String(shareText ?? '').trim();
+    const message = customText ? `${customText}\n\n${baseMessage}` : baseMessage;
+
     try {
       await Share.share({
         title: event.title,
         message,
       });
+      setShareSheetVisible(false);
     } catch (error) {
       console.warn('onShareEvent failed:', error);
       addNotification({
@@ -1332,6 +1354,19 @@ export default function EventDetailScreen() {
       setBookmarkPending(false);
     }
   }, [addNotification, bookmarkPending, currentUserId, eventId, isBookmarked, t]);
+
+  const onPressMessageOrganizer = useCallback(() => {
+    const organizerId = String(event?.creator_id ?? '').trim();
+    if (!organizerId) return;
+
+    if (!currentUserId) {
+      promptLogin(t('event.detail.messageOrganizerLoginRequired'));
+      return;
+    }
+
+    if (organizerId === currentUserId) return;
+    router.push(`/messages/${organizerId}` as any);
+  }, [currentUserId, event?.creator_id, promptLogin, t]);
 
   if (loading) {
     return (
@@ -1401,7 +1436,10 @@ export default function EventDetailScreen() {
 
             {isOwner ? (
               <Pressable
-                onPress={() => setShowEditModal(true)}
+                onPress={() => {
+                  releaseOverlayTriggerFocus();
+                  setShowEditModal(true);
+                }}
                 style={({ pressed }) => [styles.editBtn, pressed ? { opacity: 0.84 } : null]}
                 accessibilityRole="button"
               >
@@ -1437,7 +1475,10 @@ export default function EventDetailScreen() {
 
           <View style={styles.utilityActionsRow}>
             <Pressable
-              onPress={() => void onShareEvent()}
+              onPress={() => {
+                releaseOverlayTriggerFocus();
+                setShareSheetVisible(true);
+              }}
               style={({ pressed }) => [
                 styles.utilityActionBtn,
                 {
@@ -1490,6 +1531,27 @@ export default function EventDetailScreen() {
                     : t('event.detail.bookmarkAction')}
               </Text>
             </Pressable>
+
+            {!isOwner && !!event.creator_id ? (
+              <Pressable
+                onPress={onPressMessageOrganizer}
+                style={({ pressed }) => [
+                  styles.utilityActionBtn,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)',
+                  },
+                  pressed ? { opacity: 0.84 } : null,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={t('event.detail.messageOrganizerAction')}
+              >
+                <MaterialCommunityIcons name="message-text-outline" size={18} color={ExploreEaseColors.primary} />
+                <Text style={[styles.utilityActionText, { color: colors.text }]}>
+                  {t('event.detail.messageOrganizerAction')}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 
@@ -1655,6 +1717,12 @@ export default function EventDetailScreen() {
           const helpfulCount = typeof item.helpful_count === 'number' ? item.helpful_count : 0;
           const isHelpful = !!item.viewer_has_helpful_vote;
           const reviewImageUrls = toReviewImageUrls(item.review_image_urls);
+          const reviewerId = String(item.user_id ?? '').trim();
+          const onPressReviewer = reviewerId
+            ? () => {
+                router.push(`/user/${reviewerId}` as any);
+              }
+            : undefined;
 
           return (
             <ReviewCard
@@ -1682,7 +1750,10 @@ export default function EventDetailScreen() {
               }
               onSubmitReply={() => void submitReplyToReview(reviewId)}
               onToggleHelpful={() => void onToggleHelpfulReview(item)}
-              onReport={() => openReportModal(reviewId)}
+              reportDisabled={!!reportedReviewIds[reviewId]}
+              reportLoading={reportingReviewId === reviewId}
+              onReport={() => void handleReportReview(reviewId, 'Inappropriate content')}
+              onPressReviewer={onPressReviewer}
             />
           );
         })}
@@ -2278,22 +2349,10 @@ export default function EventDetailScreen() {
         </SafeAreaView>
       </Modal>
 
-      <ModerationModal
-        visible={reportModalVisible}
-        isDark={isDark}
-        reason={reportReason}
-        submitting={submittingReport}
-        onClose={() => {
-          if (submittingReport) return;
-          setReportModalVisible(false);
-          setReportReviewId(null);
-          setReportReason('');
-        }}
-        onChangeReason={setReportReason}
-        onSubmit={() => void submitReviewReport()}
-        title={t('review.report.title')}
-        description={t('review.report.description')}
-        submitLabel={t('review.report.submit')}
+      <ShareBottomSheet
+        isVisible={shareSheetVisible}
+        onClose={() => setShareSheetVisible(false)}
+        onShare={(text) => void onShareEvent(text)}
       />
     </SafeAreaView>
   );
@@ -2513,11 +2572,13 @@ const styles = StyleSheet.create({
   utilityActionsRow: {
     marginTop: 4,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     columnGap: 10,
     rowGap: 10,
   },
   utilityActionBtn: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '48%',
     minHeight: 44,
     borderRadius: 12,
     borderWidth: 1,

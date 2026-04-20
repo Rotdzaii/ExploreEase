@@ -1,6 +1,7 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
+import { authService } from '@/src/services/authService';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as AuthSession from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
@@ -168,25 +169,46 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
-      const { error } = isLogin 
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ 
-            email, 
-            password, 
-            options: { data: { full_name: fullName } } 
-          });
+      if (isLogin) {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+        if (error) {
+          triggerShake();
+          Alert.alert(t('auth.login.errorSystemTitle'), error.message);
+          return;
+        }
+
+        if (data.session) {
+          const mfaGate = await authService.getMfaGateInfo(data.session.user ?? null);
+          if (mfaGate.requiresMfa) {
+            router.replace({
+              pathname: '/mfa-verify',
+              params: {
+                factorId: mfaGate.factorId ?? '',
+              },
+            } as any);
+            return;
+          }
+        }
+
+        router.replace('/(tabs)');
+        return;
+      }
+
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: fullName } },
+      });
 
       if (error) {
         triggerShake();
         Alert.alert(t('auth.login.errorSystemTitle'), error.message);
-      } else {
-        if (isLogin) {
-          router.replace('/(tabs)');
-        } else {
-          Alert.alert(t('auth.login.successTitle'), t('auth.login.successSignupVerifyEmail'));
-          toggleAuthMode(true);
-        }
+        return;
       }
+
+      Alert.alert(t('auth.login.successTitle'), t('auth.login.successSignupVerifyEmail'));
+      toggleAuthMode(true);
     } catch {
       Alert.alert(t('auth.login.errorConnectionTitle'), t('auth.login.errorSupabaseConnection'));
     } finally {

@@ -7,10 +7,12 @@ import {
 } from '@/src/services/recommendationService';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import {
     ActivityIndicator,
     ImageBackground,
+    type NativeScrollEvent,
+    type NativeSyntheticEvent,
     Platform,
     Pressable,
     ScrollView,
@@ -38,6 +40,14 @@ type YouMightAlsoLikeProps = {
   subtitle?: string;
 };
 
+type WebWheelEventLike = {
+  nativeEvent?: {
+    deltaX?: number;
+    deltaY?: number;
+  };
+  preventDefault?: () => void;
+};
+
 const resolveTravelStyleKey = (travelStyle?: string | null) => {
   if (!travelStyle) return null;
 
@@ -61,6 +71,8 @@ export function YouMightAlsoLike({
   const { isDark } = useTheme();
   const { t } = useI18n();
   const resolvedTitle = title ?? t('recommendation.suggestions.title');
+  const rowScrollRef = useRef<ScrollView | null>(null);
+  const horizontalOffsetRef = useRef(0);
 
   const palette = useMemo(
     () => ({
@@ -86,6 +98,30 @@ export function YouMightAlsoLike({
     });
   }, [t, timeOfDay, travelStyle]);
 
+  const onRowScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    horizontalOffsetRef.current = event.nativeEvent.contentOffset.x;
+  }, []);
+
+  const onRowWheel = useCallback((event: WebWheelEventLike) => {
+    if (Platform.OS !== 'web') return;
+
+    const wheelEvent = event?.nativeEvent ?? {};
+    const deltaX = Number(wheelEvent.deltaX ?? 0);
+    const deltaY = Number(wheelEvent.deltaY ?? 0);
+    const dominantDelta = Math.abs(deltaY) > Math.abs(deltaX) ? deltaY : deltaX;
+
+    if (!Number.isFinite(dominantDelta) || Math.abs(dominantDelta) < 0.5) {
+      return;
+    }
+
+    horizontalOffsetRef.current = Math.max(0, horizontalOffsetRef.current + dominantDelta);
+    rowScrollRef.current?.scrollTo({ x: horizontalOffsetRef.current, y: 0, animated: false });
+  }, []);
+
+  const webWheelProps = Platform.OS === 'web'
+    ? ({ onWheel: onRowWheel as unknown as (event: unknown) => void } as Record<string, unknown>)
+    : {};
+
   return (
     <View style={[styles.sectionWrap, { backgroundColor: palette.sectionBg, borderColor: palette.cardBorder }]}>
       <View style={styles.headerRow}>
@@ -107,7 +143,15 @@ export function YouMightAlsoLike({
       ) : null}
 
       {!loading && items.length > 0 ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+        <ScrollView
+          ref={rowScrollRef}
+          horizontal
+          onScroll={onRowScroll}
+          scrollEventThrottle={16}
+          showsHorizontalScrollIndicator={Platform.OS === 'web'}
+          contentContainerStyle={styles.row}
+          {...webWheelProps}
+        >
           {items.map((item) => {
             const imageUrl = item.imageUrl || (item.kind === 'event' ? FALLBACK_EVENT_IMAGE : FALLBACK_DESTINATION_IMAGE);
 

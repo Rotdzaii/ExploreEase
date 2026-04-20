@@ -25,8 +25,11 @@ export type AdminEventRow = {
   created_at?: string | null;
 };
 
+export type AdminReportSource = 'destination' | 'event';
+
 export type AdminReviewReportRow = {
   id: string;
+  source: AdminReportSource;
   review_id: string;
   reporter_id: string;
   reason: string;
@@ -39,6 +42,7 @@ export type AdminReviewReportRow = {
     rating: number;
     comment?: string | null;
     destination_id?: string | number | null;
+    event_id?: string | null;
     created_at?: string | null;
     reviewer_name?: string | null;
   } | null;
@@ -58,6 +62,12 @@ const normalizeRole = (role: unknown) => String(role ?? '').trim().toLowerCase()
 const safeCount = (value: unknown): number => {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0;
   return Math.floor(value);
+};
+
+const safeTimestamp = (value: string | null | undefined): number => {
+  if (!value) return 0;
+  const ts = Date.parse(value);
+  return Number.isFinite(ts) ? ts : 0;
 };
 
 const isMissingRelationError = (error: unknown): boolean => {
@@ -271,16 +281,27 @@ export const adminService = {
   async getPendingReviewReports(): Promise<AdminReviewReportRow[]> {
     await ensureAdmin();
 
-    const { data: reports, error: reportsErr } = await supabase
-      .from('review_reports')
-      .select('id, review_id, reporter_id, reason, status, created_at')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true })
-      .limit(400);
+    const [destinationReportsRes, eventReportsRes] = await Promise.all([
+      supabase
+        .from('review_reports')
+        .select('id, review_id, reporter_id, reason, status, created_at')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true })
+        .limit(400),
+      supabase
+        .from('event_review_reports')
+        .select('id, review_id, reporter_id, reason, status, created_at')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true })
+        .limit(400),
+    ]);
 
-    if (reportsErr) throw reportsErr;
+    if (destinationReportsRes.error) throw destinationReportsRes.error;
+    if (eventReportsRes.error && !isMissingRelationError(eventReportsRes.error)) {
+      throw eventReportsRes.error;
+    }
 
-    const reportRows = (reports ?? []) as {
+    const destinationReportRows = (destinationReportsRes.data ?? []) as {
       id: string;
       review_id: string;
       reporter_id: string;
@@ -289,39 +310,99 @@ export const adminService = {
       created_at: string;
     }[];
 
-    const reviewIds = unique(reportRows.map((row) => String(row.review_id ?? '')).filter(Boolean));
+    const eventReportRows = (eventReportsRes.error ? [] : (eventReportsRes.data ?? [])) as {
+      id: string;
+      review_id: string;
+      reporter_id: string;
+      reason: string;
+      status: string;
+      created_at: string;
+    }[];
 
-    const reviewsById = new Map<string, AdminReviewReportRow['review']>();
-    if (reviewIds.length > 0) {
-      const { data: reviews } = await supabase
-        .from('reviews')
-        .select('id, user_id, rating, comment, destination_id, created_at')
-        .in('id', reviewIds);
+    const reportRows = [
+      ...destinationReportRows.map((row) => ({ ...row, source: 'destination' as const })),
+      ...eventReportRows.map((row) => ({ ...row, source: 'event' as const })),
+    ].sort((a, b) => safeTimestamp(a.created_at) - safeTimestamp(b.created_at));
 
-      const reviewRows = (reviews ?? []) as {
-        id: string;
-        user_id: string;
-        rating: number;
-        comment?: string | null;
-        destination_id?: string | number | null;
-        created_at?: string | null;
-      }[];
+    const destinationReviewIds = unique(
+      destinationReportRows.map((row) => String(row.review_id ?? '')).filter(Boolean)
+    );
+    const eventReviewIds = unique(
+      eventReportRows.map((row) => String(row.review_id ?? '')).filter(Boolean)
+    );
 
-      for (const review of reviewRows) {
-        reviewsById.set(String(review.id), {
-          id: String(review.id),
-          user_id: String(review.user_id),
-          rating: Number(review.rating ?? 0),
-          comment: review.comment ?? null,
-          destination_id: review.destination_id ?? null,
-          created_at: review.created_at ?? null,
-          reviewer_name: null,
-        });
-      }
+    const [destinationReviewsRes, eventReviewsRes] = await Promise.all([
+      destinationReviewIds.length > 0
+        ? supabase
+            .from('reviews')
+            .select('id, user_id, rating, comment, destination_id, created_at')
+            .in('id', destinationReviewIds)
+        : Promise.resolve({ data: [], error: null } as any),
+      eventReviewIds.length > 0
+        ? supabase
+            .from('event_reviews')
+            .select('id, user_id, rating, comment, event_id, created_at')
+            .in('id', eventReviewIds)
+        : Promise.resolve({ data: [], error: null } as any),
+    ]);
+
+    if (destinationReviewsRes.error && !isMissingRelationError(destinationReviewsRes.error)) {
+      throw destinationReviewsRes.error;
+    }
+    if (eventReviewsRes.error && !isMissingRelationError(eventReviewsRes.error)) {
+      throw eventReviewsRes.error;
+    }
+
+    const reviewsByKey = new Map<string, AdminReviewReportRow['review']>();
+
+    for (const review of ((destinationReviewsRes.data ?? []) as {
+      id: string;
+      user_id: string;
+      rating: number;
+      comment?: string | null;
+      destination_id?: string | number | null;
+      created_at?: string | null;
+    }[])) {
+      const reviewId = String(review.id ?? '').trim();
+      if (!reviewId) continue;
+
+      reviewsByKey.set(`destination:${reviewId}`, {
+        id: reviewId,
+        user_id: String(review.user_id ?? ''),
+        rating: Number(review.rating ?? 0),
+        comment: review.comment ?? null,
+        destination_id: review.destination_id ?? null,
+        event_id: null,
+        created_at: review.created_at ?? null,
+        reviewer_name: null,
+      });
+    }
+
+    for (const review of ((eventReviewsRes.data ?? []) as {
+      id: string;
+      user_id: string;
+      rating: number;
+      comment?: string | null;
+      event_id?: string | null;
+      created_at?: string | null;
+    }[])) {
+      const reviewId = String(review.id ?? '').trim();
+      if (!reviewId) continue;
+
+      reviewsByKey.set(`event:${reviewId}`, {
+        id: reviewId,
+        user_id: String(review.user_id ?? ''),
+        rating: Number(review.rating ?? 0),
+        comment: review.comment ?? null,
+        destination_id: null,
+        event_id: review.event_id ?? null,
+        created_at: review.created_at ?? null,
+        reviewer_name: null,
+      });
     }
 
     const reporterIds = reportRows.map((row) => String(row.reporter_id ?? ''));
-    const reviewerIds = Array.from(reviewsById.values())
+    const reviewerIds = Array.from(reviewsByKey.values())
       .map((review) => String(review?.user_id ?? ''));
 
     const profileIds = unique([...reporterIds, ...reviewerIds].filter(Boolean));
@@ -341,31 +422,34 @@ export const adminService = {
       }
     }
 
-    for (const review of reviewsById.values()) {
+    for (const review of reviewsByKey.values()) {
       if (!review) continue;
       review.reviewer_name = profileNameById.get(review.user_id) ?? null;
     }
 
     return reportRows.map((report) => ({
       id: report.id,
+      source: report.source,
       review_id: String(report.review_id),
       reporter_id: String(report.reporter_id),
       reason: report.reason,
       status: report.status,
       created_at: report.created_at,
       reporter_name: profileNameById.get(String(report.reporter_id)) ?? null,
-      review: reviewsById.get(String(report.review_id)) ?? null,
+      review: reviewsByKey.get(`${report.source}:${String(report.review_id)}`) ?? null,
     }));
   },
 
-  async dismissReviewReport(reportId: string): Promise<void> {
+  async dismissReviewReport(reportId: string, source: AdminReportSource = 'destination'): Promise<void> {
     await ensureAdmin();
 
     const id = reportId.trim();
     if (!id) throw new Error('Report ID is required');
 
+    const tableName = source === 'event' ? 'event_review_reports' : 'review_reports';
+
     const { error } = await supabase
-      .from('review_reports')
+      .from(tableName)
       .update({ status: 'dismissed' })
       .eq('id', id)
       .eq('status', 'pending');
@@ -373,7 +457,11 @@ export const adminService = {
     if (error) throw error;
   },
 
-  async deleteReviewAndResolveReport(reportId: string, reviewId: string): Promise<void> {
+  async deleteReviewAndResolveReport(
+    reportId: string,
+    reviewId: string,
+    source: AdminReportSource = 'destination'
+  ): Promise<void> {
     await ensureAdmin();
 
     const resolvedReportId = reportId.trim();
@@ -381,6 +469,35 @@ export const adminService = {
 
     if (!resolvedReportId) throw new Error('Report ID is required');
     if (!resolvedReviewId) throw new Error('Review ID is required');
+
+    if (source === 'event') {
+      const { error: resolveOneErr } = await supabase
+        .from('event_review_reports')
+        .update({ status: 'resolved' })
+        .eq('id', resolvedReportId);
+
+      if (resolveOneErr && !isMissingRelationError(resolveOneErr)) {
+        throw resolveOneErr;
+      }
+
+      const { error: resolveRelatedErr } = await supabase
+        .from('event_review_reports')
+        .update({ status: 'resolved' })
+        .eq('review_id', resolvedReviewId)
+        .eq('status', 'pending');
+
+      if (resolveRelatedErr && !isMissingRelationError(resolveRelatedErr)) {
+        throw resolveRelatedErr;
+      }
+
+      const { error: deleteReviewErr } = await supabase
+        .from('event_reviews')
+        .delete()
+        .eq('id', resolvedReviewId);
+
+      if (deleteReviewErr) throw deleteReviewErr;
+      return;
+    }
 
     const { error: deleteVotesErr } = await supabase
       .from('review_helpful_votes')

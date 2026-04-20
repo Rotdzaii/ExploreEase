@@ -1,10 +1,11 @@
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
+import { useAuth } from '@/src/context/auth';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import { supabase } from '@/src/services/supabase';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, Stack } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -22,6 +23,9 @@ import {
 type RecoveryStep = 'email' | 'otp' | 'password' | 'success';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const OTP_LENGTH = 6;
+const EMPTY_OTP_DIGITS = Array.from({ length: OTP_LENGTH }, () => '');
+const PASSWORD_RECOVERY_MODE = 'update-password';
 
 const validatePassword = (pwd: string) => ({
   minChar: pwd.length >= 8,
@@ -54,8 +58,10 @@ const getProgressStep = (step: RecoveryStep) => {
 
 export default function ForgotPasswordScreen() {
   const { isDark } = useTheme();
+  const { isPasswordRecovery, session } = useAuth();
   const { t } = useI18n();
   const addNotification = useNotificationStore((s) => s.addNotification);
+  const searchParams = useLocalSearchParams<{ mode?: string | string[] }>();
 
   const [step, setStep] = useState<RecoveryStep>('email');
   const [loading, setLoading] = useState(false);
@@ -64,7 +70,7 @@ export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
 
-  const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const [otpDigits, setOtpDigits] = useState<string[]>(EMPTY_OTP_DIGITS);
   const [otpError, setOtpError] = useState('');
   const [resendTimer, setResendTimer] = useState(0);
   const otpRefs = useRef<(TextInput | null)[]>([]);
@@ -74,6 +80,8 @@ export default function ForgotPasswordScreen() {
   const [passwordError, setPasswordError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const recoveryModeParam = Array.isArray(searchParams.mode) ? searchParams.mode[0] : searchParams.mode;
 
   const progressStep = getProgressStep(step);
   const strength = useMemo(() => {
@@ -126,6 +134,15 @@ export default function ForgotPasswordScreen() {
     return () => clearTimeout(timer);
   }, [resendTimer, step]);
 
+  useEffect(() => {
+    const shouldOpenUpdatePassword =
+      Boolean(session) && (isPasswordRecovery || recoveryModeParam === PASSWORD_RECOVERY_MODE);
+
+    if (!shouldOpenUpdatePassword) return;
+
+    setStep((prev) => (prev === 'success' ? prev : 'password'));
+  }, [isPasswordRecovery, recoveryModeParam, session]);
+
   const handleSendCode = async () => {
     const clean = emailDraft.trim().toLowerCase();
     setEmailError('');
@@ -150,7 +167,7 @@ export default function ForgotPasswordScreen() {
       if (error) throw error;
 
       setEmail(clean);
-      setOtpDigits(['', '', '', '', '', '']);
+      setOtpDigits(EMPTY_OTP_DIGITS);
       setOtpError('');
       setStep('otp');
       setResendTimer(60);
@@ -165,14 +182,34 @@ export default function ForgotPasswordScreen() {
   };
 
   const handleOtpInputChange = (index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return;
+    const digits = String(value ?? '').replace(/\D/g, '');
+    if (!digits && value) return;
+
+    // Support paste/auto-fill: distribute multiple digits from the focused box onward.
+    if (digits.length > 1) {
+      const next = [...otpDigits];
+      for (let i = index; i < OTP_LENGTH; i += 1) {
+        next[i] = '';
+      }
+
+      for (let offset = 0; offset < digits.length && index + offset < OTP_LENGTH; offset += 1) {
+        next[index + offset] = digits[offset];
+      }
+
+      setOtpDigits(next);
+      setOtpError('');
+
+      const nextFocus = Math.min(index + digits.length, OTP_LENGTH - 1);
+      otpRefs.current[nextFocus]?.focus();
+      return;
+    }
 
     const next = [...otpDigits];
-    next[index] = value.slice(-1);
+    next[index] = digits;
     setOtpDigits(next);
     setOtpError('');
 
-    if (value && index < otpRefs.current.length - 1) {
+    if (digits && index < otpRefs.current.length - 1) {
       otpRefs.current[index + 1]?.focus();
     }
   };
@@ -186,7 +223,7 @@ export default function ForgotPasswordScreen() {
   const handleVerifyOtp = async () => {
     const otpCode = otpDigits.join('');
 
-    if (otpCode.length !== 6) {
+    if (otpCode.length !== OTP_LENGTH) {
       const msg = t('auth.recovery.enterAllOtpDigits');
       setOtpError(msg);
       notify(msg, 'error');
@@ -207,6 +244,13 @@ export default function ForgotPasswordScreen() {
           access_token: data.session.access_token,
           refresh_token: data.session.refresh_token,
         });
+
+        router.replace({
+          pathname: '/forgot-password',
+          params: {
+            mode: PASSWORD_RECOVERY_MODE,
+          },
+        } as any);
       }
 
       setStep('password');
@@ -232,7 +276,7 @@ export default function ForgotPasswordScreen() {
       const { error } = await supabase.auth.resetPasswordForEmail(email);
       if (error) throw error;
 
-      setOtpDigits(['', '', '', '', '', '']);
+      setOtpDigits(EMPTY_OTP_DIGITS);
       setOtpError('');
       setResendTimer(60);
       otpRefs.current[0]?.focus();
@@ -387,9 +431,11 @@ export default function ForgotPasswordScreen() {
             onChangeText={(value) => handleOtpInputChange(index, value)}
             onKeyPress={(e) => handleOtpKeyPress(index, e.nativeEvent.key)}
             keyboardType="number-pad"
-            maxLength={1}
+            maxLength={OTP_LENGTH}
             placeholder="0"
             placeholderTextColor={colors.muted}
+            textContentType="oneTimeCode"
+            autoComplete={Platform.OS === 'android' ? 'sms-otp' : 'one-time-code'}
             editable={!loading}
             style={[
               styles.otpInput,
@@ -407,10 +453,10 @@ export default function ForgotPasswordScreen() {
 
       <Pressable
         onPress={() => void handleVerifyOtp()}
-        disabled={loading || otpDigits.join('').length !== 6}
+        disabled={loading || otpDigits.join('').length !== OTP_LENGTH}
         style={({ pressed }) => [
           styles.primaryBtn,
-          (loading || otpDigits.join('').length !== 6) ? { opacity: 0.5 } : null,
+          (loading || otpDigits.join('').length !== OTP_LENGTH) ? { opacity: 0.5 } : null,
           pressed ? { opacity: 0.86 } : null,
         ]}
         accessibilityRole="button"

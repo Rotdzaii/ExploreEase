@@ -168,13 +168,13 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 
         [x] Secure API communication with HTTPS: Mặc định của Supabase Cloud.
 
-        [ ] App-level encryption for cached data: Cần sử dụng expo-secure-store thay cho AsyncStorage đối với các thông tin nhạy cảm.
+        [x] App-level encryption for cached data: Cần sử dụng expo-secure-store thay cho AsyncStorage đối với các thông tin nhạy cảm.
 
-        [ ] Two-factor auth (Optional): Có thể kích hoạt qua Supabase Auth Dashboard.
+        [x] Two-factor auth (Optional): Có thể kích hoạt qua Supabase Auth Dashboard.
 
 11.  ADMIN DASHBOARD (New - 5%)
 
-    [ ] View: user profiles, events, reviews:
+    [x] View: user profiles, events, reviews:
 
         Status: Xem trực tiếp qua Supabase Dashboard (Backend). Cần làm một màn hình UI dành riêng cho tài khoản có role: 'admin' để xem danh sách này trên app hoặc web.
 
@@ -182,7 +182,7 @@ Status: Cột travel_style đã có trong Database. Cần thêm nhãn (tag) suit
 
         Status: Đã triển khai approval_status (pending/approved/rejected) và Admin Dashboard cho phép Approve/Reject.
 
-        [ ] Moderate flagged content:
+        [x] Moderate flagged content:
 
         Status: Kết hợp với Module 7.3. Khi có bản ghi trong bảng reports, Admin sẽ có quyền xóa Review hoặc ẩn địa điểm.
 
@@ -257,4 +257,21 @@ Status: Cần một bảng activities ghi lại các trigger từ Reviews và Bo
 ## Future Enhancements (Cải tiến trong tương lai)
 - [ ] **Profile Onboarding Guard:** Thêm Global Guard lớp thứ 2 để ép buộc user mới đăng ký phải cập nhật đầy đủ thông tin (tên, avatar) trước khi vào trang chủ.
 - [ ] Anti replay attack
-- [ ] - [ ] **Realtime Voice Streaming:** Nâng cấp Voice Search, hiển thị chữ ngay lập tức theo thời gian thực (streaming) khi người dùng đang nói thay vì đợi kết thúc.
+- [ ] - [ ] **Realtime Voice Streaming:** Nâng cấp Voice Search, hiển thị chữ ngay lập tức theo thời gian thực (streaming) khi người dùng đang nói thay vì đợi kết thúc. (can than het request)
+  
+- 1. Chuẩn hóa & Cấu trúc lại Dữ liệu (Data Normalization)
+[ ] Review lại cơ chế Giá (Pricing Mechanism): Xây dựng luồng kiểm duyệt (Validation) hoặc cấu hình giá trần/giá sàn. Phân tách rõ ràng giữa "Giá vé tham quan", "Giá trung bình món ăn" và "Giá tour trọn gói" để tránh hiển thị sai lệch (ví dụ: tour mạo hiểm lên tới hàng chục triệu đồng).
+
+[ ] Hoàn thiện Schema Database: Đảm bảo toàn bộ các bản ghi mới đều được map chuẩn tọa độ vào cột geom (PostGIS) để phục vụ thuật toán không gian (Spatial Algorithms).
+
+[ ] Cập nhật Assets: Triển khai luồng cập nhật ảnh chất lượng cao (High-res Images) cho toàn bộ địa điểm, tối ưu hóa dung lượng ảnh trên AWS S3 hoặc Supabase Storage để tăng tốc độ tải trang.
+
+2. Tích hợp Hệ thống ngoài (Third-party Integrations)
+[ ] Đồng bộ Rating Real-time: Tích hợp Google Maps Places API (hoặc TripAdvisor API). Thay vì dùng số sao tĩnh (Static Rating) trong Database, hệ thống sẽ fetch và đồng bộ số sao, lượt đánh giá thực tế định kỳ từ Google Maps để tăng độ tin cậy cho thuật toán ưu tiên.
+
+3. Mở rộng Quy mô Hệ thống (Scalability & Big Data)
+[ ] Data Crawling & Expansion: Nghiên cứu và xây dựng các Data Pipeline (VD: dùng Python/Scrapy) để thu thập thêm hàng ngàn địa điểm du lịch, khách sạn, quán ăn mới giống các nền tảng OTA (Traveloka, Klook).
+
+[ ] Tối ưu hóa Hiệu năng (Performance Tuning): Khi dữ liệu phình to lên hàng vạn điểm, cần nghiên cứu áp dụng Clustering trên bản đồ (nhóm các điểm gần nhau) và Pagination / Infinite Scrolling cho danh sách để không làm crash Mobile App.
+
+4. STT (Search)

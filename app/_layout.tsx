@@ -85,13 +85,17 @@ export default function RootLayout() {
               <Stack.Screen name="login" />
               <Stack.Screen name="forgot-password" />
               <Stack.Screen name="recovery-password" />
+              <Stack.Screen name="mfa-verify" />
               <Stack.Screen name="event/[id]" />
+              <Stack.Screen name="festivals" />
               <Stack.Screen name="itinerary/[id]" />
               <Stack.Screen name="notifications" />
               <Stack.Screen name="security" />
               <Stack.Screen name="messages/index" />
               <Stack.Screen name="messages/[id]" />
+              <Stack.Screen name="user/[id]" />
               <Stack.Screen name="admin/dashboard" />
+              <Stack.Screen name="search-filter" />
 
               {/* Nhóm các màn hình có Tab (Home, Settings...) */}
               <Stack.Screen name="(tabs)" />

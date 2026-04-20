@@ -37,6 +37,19 @@ export type TravelSearchIntentResult = {
   reasoning_hidden: string;
 };
 
+export const SMART_SEARCH_LANGUAGE_CODES = ['vi', 'en', 'ja'] as const;
+
+export type SmartSearchLanguageCode = (typeof SMART_SEARCH_LANGUAGE_CODES)[number];
+
+type ExtractTravelSearchIntentOptions = {
+  currentLanguage?: string | null;
+};
+
+type TranslateSmartSearchTextOptions = {
+  fromLanguage?: string | null;
+  toLanguage?: string | null;
+};
+
 type GeminiErrorPayload = {
   error?: {
     message?: string;
@@ -168,6 +181,19 @@ const SEMANTIC_REASONING_CUES: Record<string, SemanticReasoningCue> = {
     suggestedPlaces: ['Sa Pa', 'Măng Đen', 'Bảo Lộc', 'Tam Đảo', 'Côn Đảo'],
     reasoningHint: 'Tập trung điểm đến nhẹ nhàng, nhiều cây xanh và ít ồn ào.',
   },
+};
+
+const SMART_SEARCH_LANGUAGE_LABELS: Record<SmartSearchLanguageCode, string> = {
+  vi: 'tiếng Việt',
+  en: 'English',
+  ja: 'Japanese',
+};
+
+const normalizeSmartSearchLanguageCode = (value?: string | null): SmartSearchLanguageCode => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'en') return 'en';
+  if (normalized === 'ja') return 'ja';
+  return 'vi';
 };
 
 const INTENT_TYPE_DEFAULT_CATEGORY_HINTS: Record<TravelIntentType, TravelCategoryHint[]> = {
@@ -313,26 +339,29 @@ const GENERAL_KEYWORD_ALIAS_TO_VIETNAMESE: Record<string, string> = {
   cuisine: 'ẩm thực',
 };
 
-const SMART_SEARCH_SYSTEM_INSTRUCTION = `
+const buildSmartSearchSystemInstruction = (currentLanguage: SmartSearchLanguageCode) => `
 Bạn là Master Vietnamese Travel Expert cho ứng dụng ExploreEase.
+
+Bối cảnh ngôn ngữ:
+- current_language="${currentLanguage}".
+- Các trường văn bản đầu ra (ai_suggested_places, reasoning_hidden) phải dùng ${SMART_SEARCH_LANGUAGE_LABELS[currentLanguage]}.
 
 Ràng buộc bắt buộc:
 1) Luôn trả về DUY NHẤT một JSON object hợp lệ, không markdown, không giải thích thêm.
-2) Luôn dùng tiếng Việt cho toàn bộ nội dung văn bản trong JSON.
-3) intent_type chỉ được chọn một trong: ["spiritual", "nature", "beach", "adventure", "food", "unknown"].
-4) category_hints chỉ được chọn từ: ["Thiên nhiên", "Văn hóa", "Giải trí", "Ẩm thực", "Nghỉ dưỡng", "Mạo hiểm"].
-5) Bắt buộc suy luận ngữ nghĩa cho truy vấn trừu tượng/tiếng lóng/mood.
-6) Mapping cứng cho tâm linh:
+2) intent_type chỉ được chọn một trong: ["spiritual", "nature", "beach", "adventure", "food", "unknown"].
+3) category_hints chỉ được chọn từ: ["Thiên nhiên", "Văn hóa", "Giải trí", "Ẩm thực", "Nghỉ dưỡng", "Mạo hiểm"].
+4) Bắt buộc suy luận ngữ nghĩa cho truy vấn trừu tượng/tiếng lóng/mood.
+5) Mapping cứng cho tâm linh:
   - Nếu truy vấn thuộc "cúng kiếng"/"tâm linh" => intent_type phải là "spiritual".
   - Bắt buộc ưu tiên nhóm: Chùa, Đền, Miếu, Nghĩa trang liệt sĩ.
   - Ưu tiên ví dụ: Tây Ninh (Tòa Thánh), An Giang (Miếu Bà Chúa Xứ), Côn Đảo (Nghĩa trang Hàng Dương), Ninh Bình (Bái Đính).
-7) Mapping cứng cho không khí trong lành/chữa lành:
+6) Mapping cứng cho không khí trong lành/chữa lành:
   - Ưu tiên vùng cao/rừng: Sa Pa, Hà Giang, Măng Đen, Bảo Lộc (không chỉ Đà Lạt).
-8) Regional rotation bắt buộc:
+7) Regional rotation bắt buộc:
   - ai_suggested_places phải có 5-7 địa danh và có ít nhất 1 địa danh miền Bắc, 1 miền Trung, 1 miền Nam.
-9) reasoning_hidden là 1 câu ngắn giải thích vì sao gợi ý phù hợp nhu cầu.
-10) Nếu truy vấn không liên quan du lịch thì đặt is_travel_related=false, intent_type="unknown", category_hints=[], ai_suggested_places=[], reasoning_hidden="".
-11) is_free:
+8) reasoning_hidden là 1 câu ngắn giải thích vì sao gợi ý phù hợp nhu cầu.
+9) Nếu truy vấn không liên quan du lịch thì đặt is_travel_related=false, intent_type="unknown", category_hints=[], ai_suggested_places=[], reasoning_hidden="".
+10) is_free:
    - true: người dùng muốn miễn phí/tiết kiệm.
    - false: người dùng muốn có phí/cao cấp.
    - null: không đề cập ngân sách.
@@ -934,8 +963,10 @@ const normalizeTravelIntentPayload = (payload: unknown, queryText: string): Trav
   };
 };
 
-const buildIntentUserPrompt = (queryText: string) => `
+const buildIntentUserPrompt = (queryText: string, currentLanguage: SmartSearchLanguageCode) => `
 Phân tích truy vấn du lịch sau bằng semantic reasoning và trả về JSON đúng schema. Hãy đóng vai Master Vietnamese Travel Expert:
+
+current_language: "${currentLanguage}"
 
 Truy vấn người dùng: "${queryText}"
 
@@ -950,13 +981,14 @@ Nhắc lại schema:
 }
 
 Lưu ý:
+- Truy vấn người dùng có thể ở tiếng Việt, English hoặc Japanese.
 - category_hints chỉ chọn từ danh sách hợp lệ đã nêu.
 - intent_type phải phản ánh đúng mục đích chính của truy vấn.
-- ai_suggested_places phải có 5-7 địa danh nổi tiếng Việt Nam, bằng tiếng Việt.
+- ai_suggested_places phải có 5-7 địa danh nổi tiếng Việt Nam, dùng ngôn ngữ theo current_language.
 - Bắt buộc đa dạng vùng miền: ít nhất 1 địa danh Bắc, 1 Trung, 1 Nam.
 - Với "cúng kiếng"/"tâm linh": ưu tiên Chùa, Đền, Miếu, Nghĩa trang liệt sĩ.
 - Với "không khí trong lành"/"chữa lành": ưu tiên Sa Pa, Hà Giang, Măng Đen, Bảo Lộc.
-- reasoning_hidden là 1 câu ngắn giải thích lý do chọn địa điểm.
+- reasoning_hidden là 1 câu ngắn giải thích lý do chọn địa điểm, dùng ngôn ngữ theo current_language.
 - Không thêm field khác.
 `;
 
@@ -1029,8 +1061,13 @@ const buildFallbackTravelIntent = (queryText: string): TravelSearchIntentResult 
 const getGeminiApiKey = () =>
   process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
 
-export async function extractTravelSearchIntent(queryText: string): Promise<TravelSearchIntentResult> {
+export async function extractTravelSearchIntent(
+  queryText: string,
+  options: ExtractTravelSearchIntentOptions = {}
+): Promise<TravelSearchIntentResult> {
   const trimmedQuery = String(queryText ?? '').trim();
+  const currentLanguage = normalizeSmartSearchLanguageCode(options.currentLanguage);
+
   if (!trimmedQuery) {
     return {
       is_travel_related: false,
@@ -1050,7 +1087,7 @@ export async function extractTravelSearchIntent(queryText: string): Promise<Trav
   const client = new GoogleGenerativeAI(apiKey);
   const model = client.getGenerativeModel({
     model: GEMINI_INTENT_MODEL,
-    systemInstruction: SMART_SEARCH_SYSTEM_INSTRUCTION,
+    systemInstruction: buildSmartSearchSystemInstruction(currentLanguage),
   });
 
   let lastError: unknown = null;
@@ -1066,7 +1103,7 @@ export async function extractTravelSearchIntent(queryText: string): Promise<Trav
         contents: [
           {
             role: 'user',
-            parts: [{ text: buildIntentUserPrompt(trimmedQuery) }],
+            parts: [{ text: buildIntentUserPrompt(trimmedQuery, currentLanguage) }],
           },
         ],
       });
@@ -1082,6 +1119,97 @@ export async function extractTravelSearchIntent(queryText: string): Promise<Trav
   const reason = String((lastError as any)?.message ?? '').trim() || 'Unable to extract intent from Gemini.';
   console.warn('extractTravelSearchIntent fallback activated:', reason);
   return buildFallbackTravelIntent(trimmedQuery);
+}
+
+const parseJsonArrayFromResponse = (text: string): unknown[] => {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error('Gemini returned empty translation content.');
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray((parsed as any)?.translations)) {
+      return (parsed as any).translations as unknown[];
+    }
+  } catch {
+    // Parse fallback continues below.
+  }
+
+  const arrayStart = trimmed.indexOf('[');
+  const arrayEnd = trimmed.lastIndexOf(']');
+  if (arrayStart >= 0 && arrayEnd > arrayStart) {
+    const parsed = JSON.parse(trimmed.slice(arrayStart, arrayEnd + 1));
+    if (Array.isArray(parsed)) return parsed;
+  }
+
+  throw new Error('Unable to parse JSON array from Gemini translation response.');
+};
+
+const buildTranslationPrompt = (texts: string[], fromLanguage: SmartSearchLanguageCode, toLanguage: SmartSearchLanguageCode) =>
+  `Translate the following travel UI strings from ${fromLanguage} to ${toLanguage}.
+Return ONLY a JSON array of translated strings in the same order and same length.
+Do not add numbering, comments, markdown, or extra fields.
+
+Input JSON array:
+${JSON.stringify(texts)}`;
+
+export async function translateSmartSearchTexts(
+  texts: string[],
+  options: TranslateSmartSearchTextOptions = {}
+): Promise<string[]> {
+  const normalizedTexts = texts.map((value) => String(value ?? '').trim());
+  if (normalizedTexts.length === 0) return [];
+
+  const fromLanguage = normalizeSmartSearchLanguageCode(options.fromLanguage);
+  const toLanguage = normalizeSmartSearchLanguageCode(options.toLanguage);
+
+  if (fromLanguage === toLanguage) {
+    return normalizedTexts;
+  }
+
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('Missing Gemini API key. Set EXPO_PUBLIC_GEMINI_API_KEY (or GEMINI_API_KEY).');
+  }
+
+  const client = new GoogleGenerativeAI(apiKey);
+  const model = client.getGenerativeModel({ model: GEMINI_INTENT_MODEL });
+
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const result = await model.generateContent({
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 1024,
+          responseMimeType: 'application/json',
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: buildTranslationPrompt(normalizedTexts, fromLanguage, toLanguage) }],
+          },
+        ],
+      });
+
+      const translated = parseJsonArrayFromResponse(result.response.text()).map((value) =>
+        String(value ?? '').trim()
+      );
+
+      if (translated.length !== normalizedTexts.length) {
+        throw new Error('Translation response length mismatch.');
+      }
+
+      return translated.map((value, index) => value || normalizedTexts[index]);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  const reason = String((lastError as any)?.message ?? '').trim() || 'Unable to translate smart search text.';
+  throw new Error(reason);
 }
 
 export async function generateEmbedding(text: string): Promise<number[]> {

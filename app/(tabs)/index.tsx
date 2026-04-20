@@ -1,6 +1,7 @@
 import { useCurrency } from '@/src/context/currency';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
+import { eventBookmarkService } from '@/src/services/eventBookmarkService';
 import { reminderService } from '@/src/services/reminderService';
 import { transcribeAudioUri } from '@/src/services/speechService';
 import { getStyles } from '@/src/styles/homeStyles';
@@ -11,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     Animated,
     Platform,
@@ -19,10 +21,14 @@ import {
     StatusBar,
     useWindowDimensions,
     View,
-    type ColorValue
+    type ColorValue,
+    type NativeScrollEvent,
+    type NativeSyntheticEvent
 } from 'react-native';
+import { FestivalShareModal } from '../../components/events/FestivalShareModal';
 import { CategoriesCarousel } from '../../components/home/CategoriesCarousel';
 import { FeaturedDestination } from '../../components/home/FeaturedDestination';
+import { FestivalHighlights } from '../../components/home/FestivalHighlights';
 import { Header } from '../../components/home/Header';
 import { PopularDestinations } from '../../components/home/PopularDestinations';
 import { SearchBar } from '../../components/home/SearchBar';
@@ -30,6 +36,7 @@ import { TimeOfDayToggle } from '../../components/home/TimeOfDayToggle';
 import { YouMightAlsoLike, type YouMightAlsoLikeItem } from '../../components/home/YouMightAlsoLike';
 import { ExploreEaseColors } from '../../constants/exploreEaseTheme';
 import { destinationService } from '../../src/services/destinationService';
+import { eventService, type EventRow } from '../../src/services/eventService';
 import { presentLocalNotificationAsync } from '../../src/services/localNotificationService';
 import { profileService } from '../../src/services/profileService';
 import { recommendationService, resolveTimeOfDayPreference, type PersonalizedRecommendationsResult } from '../../src/services/recommendationService';
@@ -41,6 +48,26 @@ type CategoryRow = {
   name: string;
 };
 
+type HomeCategoryValue = 'all' | 'Cuisines' | 'Landmarks' | 'Activities';
+
+type HomeCategoryItem = {
+  id: HomeCategoryValue;
+  label: string;
+};
+
+const HOME_CATEGORY_ITEMS: HomeCategoryItem[] = [
+  { id: 'all', label: 'Tất cả' },
+  { id: 'Cuisines', label: 'Ẩm thực 🍜' },
+  { id: 'Landmarks', label: 'Tham quan 🏛️' },
+  { id: 'Activities', label: 'Hoạt động 🎢' },
+];
+
+const isHomeCategoryValue = (value: string): value is HomeCategoryValue => {
+  return value === 'all' || value === 'Cuisines' || value === 'Landmarks' || value === 'Activities';
+};
+
+const normalizeCategoryName = (value: string | null | undefined) => String(value ?? '').trim().toLowerCase();
+
 type DestinationRow = {
   id: number;
   name: string;
@@ -49,6 +76,10 @@ type DestinationRow = {
   rating?: number | null;
   image_url?: string | null;
   is_featured?: boolean | null;
+  category_id?: string | number | null;
+  categories?: {
+    name?: string | null;
+  } | null;
 };
 
 type NotificationRow = {
@@ -67,6 +98,28 @@ type NotificationRow = {
 const toRating = (value: DestinationRow['rating']) => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   return 4.7;
+};
+
+const HOME_DESTINATIONS_PAGE_SIZE = 24;
+const HOME_EVENTS_PAGE_SIZE = 18;
+const HOME_PRELOAD_THRESHOLD_PX = 320;
+
+const normalizeAndSortHomeEvents = (rows: EventRow[]): EventRow[] => {
+  return [...rows]
+    .filter((row) => row.approval_status !== 'rejected')
+    .sort((a, b) => {
+      const aCreated = new Date(a.created_at ?? '').getTime();
+      const bCreated = new Date(b.created_at ?? '').getTime();
+      const safeACreated = Number.isFinite(aCreated) ? aCreated : 0;
+      const safeBCreated = Number.isFinite(bCreated) ? bCreated : 0;
+      if (safeBCreated !== safeACreated) return safeBCreated - safeACreated;
+
+      const aStart = new Date(a.start_time).getTime();
+      const bStart = new Date(b.start_time).getTime();
+      const safeAStart = Number.isFinite(aStart) ? aStart : 0;
+      const safeBStart = Number.isFinite(bStart) ? bStart : 0;
+      return safeBStart - safeAStart;
+    });
 };
 
 type VoiceSearchState = 'idle' | 'recording' | 'processing';
@@ -89,20 +142,45 @@ export default function HomeScreen() {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadingDestinations, setLoadingDestinations] = useState(true);
   const [loadingPersonalized, setLoadingPersonalized] = useState(true);
-  const isLoading = loadingProfile || loadingDestinations || loadingPersonalized;
+  const [loadingHomeEvents, setLoadingHomeEvents] = useState(true);
+  const isLoading = loadingProfile || loadingDestinations || loadingPersonalized || loadingHomeEvents;
 
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [featured, setFeatured] = useState<DestinationRow | null>(null);
   const [allDestinations, setAllDestinations] = useState<DestinationRow[]>([]);
+  const [destinationsOffset, setDestinationsOffset] = useState(0);
+  const [hasMoreDestinations, setHasMoreDestinations] = useState(true);
+  const [loadingMoreDestinations, setLoadingMoreDestinations] = useState(false);
   const [popular, setPopular] = useState<DestinationRow[]>([]);
+  const [homeEvents, setHomeEvents] = useState<EventRow[]>([]);
+  const [homeEventsOffset, setHomeEventsOffset] = useState(0);
+  const [hasMoreHomeEvents, setHasMoreHomeEvents] = useState(true);
+  const [loadingMoreHomeEvents, setLoadingMoreHomeEvents] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [homeEventBookmarkMap, setHomeEventBookmarkMap] = useState<Record<string, boolean>>({});
+  const [homeEventBookmarkPendingMap, setHomeEventBookmarkPendingMap] = useState<Record<string, boolean>>({});
+  const [shareEvent, setShareEvent] = useState<EventRow | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<HomeCategoryValue>('all');
   const [personalized, setPersonalized] = useState<PersonalizedRecommendationsResult | null>(null);
 
   const categoryItems = useMemo(
-    () => categories.map((c) => ({ id: String(c.id), label: c.name })),
-    [categories]
+    () => HOME_CATEGORY_ITEMS,
+    []
   );
 
+  const selectedCategoryName = selectedCategory === 'all' ? null : selectedCategory;
+
+  const selectedCategoryId = useMemo(() => {
+    if (!selectedCategoryName) return null;
+    const selectedLower = normalizeCategoryName(selectedCategoryName);
+    const hit = categories.find((category) => normalizeCategoryName(category.name) === selectedLower);
+    return hit?.id ?? null;
+  }, [categories, selectedCategoryName]);
+
   const pulse = React.useRef(new Animated.Value(0)).current;
+  const loadingMoreDestinationsRef = React.useRef(false);
+  const loadingMoreHomeEventsRef = React.useRef(false);
+  const preloadTickRef = React.useRef(0);
 
   const effectiveTimeOfDay = useMemo(
     () => resolveTimeOfDayPreference(timeOfDayPreference),
@@ -152,22 +230,8 @@ export default function HomeScreen() {
   const applySearchText = useCallback(
     (text: string) => {
       setSearchText(text);
-
-      const normalizedQuery = normalizeSearchValue(text);
-      if (!normalizedQuery) {
-        setPopular(allDestinations);
-        return;
-      }
-
-      const next = allDestinations.filter((row) => {
-        const name = String(row.name ?? '').toLowerCase();
-        const location = String(row.location ?? '').toLowerCase();
-        return name.includes(normalizedQuery) || location.includes(normalizedQuery);
-      });
-
-      setPopular(next);
     },
-    [allDestinations, normalizeSearchValue]
+    []
   );
 
   const fetchProfile = useCallback(async () => {
@@ -185,39 +249,245 @@ export default function HomeScreen() {
   const fetchDestinations = useCallback(async () => {
     setLoadingDestinations(true);
     try {
-      const [cats, dests] = await Promise.all([
+      const [cats, featuredRows, dests] = await Promise.all([
         destinationService.getCategories() as Promise<CategoryRow[]>,
-        destinationService.getDestinations() as Promise<DestinationRow[]>,
+        destinationService.getDestinations({ isFeatured: true, limit: 1, offset: 0 }) as Promise<DestinationRow[]>,
+        destinationService.getDestinations({ limit: HOME_DESTINATIONS_PAGE_SIZE, offset: 0 }) as Promise<DestinationRow[]>,
       ]);
 
       setCategories(cats ?? []);
 
-      const featuredDestination = (dests ?? []).find((d) => !!d.is_featured) ?? null;
+      const featuredDestination = (featuredRows ?? [])[0] ?? null;
       setFeatured(featuredDestination);
 
-      setAllDestinations(dests ?? []);
-
-      const query = normalizeSearchValue(searchText);
-      if (!query) {
-        setPopular(dests ?? []);
-      } else {
-        const next = (dests ?? []).filter((row) => {
-          const name = String(row.name ?? '').toLowerCase();
-          const location = String(row.location ?? '').toLowerCase();
-          return name.includes(query) || location.includes(query);
-        });
-        setPopular(next);
-      }
+      const firstPageRows = dests ?? [];
+      setAllDestinations(firstPageRows);
+      setDestinationsOffset(firstPageRows.length);
+      setHasMoreDestinations(firstPageRows.length >= HOME_DESTINATIONS_PAGE_SIZE);
+      loadingMoreDestinationsRef.current = false;
+      setLoadingMoreDestinations(false);
     } catch (err: any) {
       console.warn('fetchDestinations failed:', err?.message ?? err);
       setCategories([]);
       setFeatured(null);
       setAllDestinations([]);
+      setDestinationsOffset(0);
+      setHasMoreDestinations(false);
+      loadingMoreDestinationsRef.current = false;
+      setLoadingMoreDestinations(false);
       setPopular([]);
     } finally {
       setLoadingDestinations(false);
     }
-  }, [normalizeSearchValue, searchText]);
+  }, []);
+
+  const loadMoreDestinations = useCallback(async () => {
+    if (loadingMoreDestinationsRef.current || loadingDestinations || !hasMoreDestinations) {
+      return;
+    }
+
+    loadingMoreDestinationsRef.current = true;
+  setLoadingMoreDestinations(true);
+
+    try {
+      const rows = await (destinationService.getDestinations({
+        limit: HOME_DESTINATIONS_PAGE_SIZE,
+        offset: destinationsOffset,
+      }) as Promise<DestinationRow[]>);
+
+      const nextRows = rows ?? [];
+
+      setAllDestinations((prev) => {
+        if (nextRows.length === 0) return prev;
+
+        const seenIds = new Set(prev.map((row) => String(row.id)));
+        const merged = [...prev];
+        for (const row of nextRows) {
+          const key = String(row.id);
+          if (seenIds.has(key)) continue;
+          seenIds.add(key);
+          merged.push(row);
+        }
+
+        return merged;
+      });
+
+      setDestinationsOffset((prev) => prev + nextRows.length);
+      if (nextRows.length < HOME_DESTINATIONS_PAGE_SIZE) {
+        setHasMoreDestinations(false);
+      }
+    } catch (err: any) {
+      console.warn('loadMoreDestinations failed:', err?.message ?? err);
+    } finally {
+      loadingMoreDestinationsRef.current = false;
+      setLoadingMoreDestinations(false);
+    }
+  }, [destinationsOffset, hasMoreDestinations, loadingDestinations]);
+
+  const fetchHomeEvents = useCallback(async () => {
+    setLoadingHomeEvents(true);
+    try {
+      const rows = await eventService.getEvents({
+        orderBy: 'created_at',
+        ascending: false,
+        limit: HOME_EVENTS_PAGE_SIZE,
+        offset: 0,
+      });
+
+      const initialRows = rows ?? [];
+      const nextEvents = normalizeAndSortHomeEvents(initialRows);
+
+      setHomeEvents(nextEvents);
+      setHomeEventsOffset(initialRows.length);
+      setHasMoreHomeEvents(initialRows.length >= HOME_EVENTS_PAGE_SIZE);
+      loadingMoreHomeEventsRef.current = false;
+      setLoadingMoreHomeEvents(false);
+    } catch (err: any) {
+      console.warn('fetchHomeEvents failed:', err?.message ?? err);
+      setHomeEvents([]);
+      setHomeEventsOffset(0);
+      setHasMoreHomeEvents(false);
+      loadingMoreHomeEventsRef.current = false;
+      setLoadingMoreHomeEvents(false);
+    } finally {
+      setLoadingHomeEvents(false);
+    }
+  }, []);
+
+  const loadMoreHomeEvents = useCallback(async () => {
+    if (loadingMoreHomeEventsRef.current || loadingHomeEvents || !hasMoreHomeEvents) {
+      return;
+    }
+
+    loadingMoreHomeEventsRef.current = true;
+  setLoadingMoreHomeEvents(true);
+
+    try {
+      const rows = await eventService.getEvents({
+        orderBy: 'created_at',
+        ascending: false,
+        limit: HOME_EVENTS_PAGE_SIZE,
+        offset: homeEventsOffset,
+      });
+
+      const nextRows = rows ?? [];
+      const normalizedNextRows = normalizeAndSortHomeEvents(nextRows);
+
+      setHomeEvents((prev) => {
+        if (normalizedNextRows.length === 0) return prev;
+
+        const rowById = new Map<string, EventRow>();
+        for (const row of prev) {
+          rowById.set(row.id, row);
+        }
+        for (const row of normalizedNextRows) {
+          rowById.set(row.id, row);
+        }
+
+        return normalizeAndSortHomeEvents(Array.from(rowById.values()));
+      });
+
+      setHomeEventsOffset((prev) => prev + nextRows.length);
+      if (nextRows.length < HOME_EVENTS_PAGE_SIZE) {
+        setHasMoreHomeEvents(false);
+      }
+    } catch (err: any) {
+      console.warn('loadMoreHomeEvents failed:', err?.message ?? err);
+    } finally {
+      loadingMoreHomeEventsRef.current = false;
+      setLoadingMoreHomeEvents(false);
+    }
+  }, [hasMoreHomeEvents, homeEventsOffset, loadingHomeEvents]);
+
+  useEffect(() => {
+    let alive = true;
+
+    const resolveCurrentUser = async () => {
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (error) throw error;
+        if (!alive) return;
+
+        setCurrentUserId(data.user?.id ?? null);
+      } catch (err: any) {
+        if (!alive) return;
+        console.warn('home resolveCurrentUser failed:', err?.message ?? err);
+        setCurrentUserId(null);
+      }
+    };
+
+    void resolveCurrentUser();
+
+    const { data } = supabase.auth.onAuthStateChange(() => {
+      void resolveCurrentUser();
+    });
+
+    return () => {
+      alive = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    const loadHomeEventBookmarks = async () => {
+      if (homeEvents.length === 0) {
+        setHomeEventBookmarkMap({});
+        return;
+      }
+
+      try {
+        const bookmarkedIds = await eventBookmarkService.getBookmarkedIds(currentUserId);
+        if (!alive) return;
+
+        const bookmarkedSet = new Set(bookmarkedIds);
+        const nextMap: Record<string, boolean> = {};
+        for (const event of homeEvents) {
+          nextMap[event.id] = bookmarkedSet.has(event.id);
+        }
+
+        setHomeEventBookmarkMap(nextMap);
+      } catch (err: any) {
+        if (!alive) return;
+        console.warn('loadHomeEventBookmarks failed:', err?.message ?? err);
+        setHomeEventBookmarkMap({});
+      }
+    };
+
+    void loadHomeEventBookmarks();
+
+    return () => {
+      alive = false;
+    };
+  }, [currentUserId, homeEvents]);
+
+  useEffect(() => {
+    const normalizedQuery = normalizeSearchValue(searchText);
+    const selectedCategoryLower = selectedCategoryName ? normalizeCategoryName(selectedCategoryName) : null;
+
+    const next = allDestinations.filter((row) => {
+      const name = String(row.name ?? '').toLowerCase();
+      const location = String(row.location ?? '').toLowerCase();
+      const matchesQuery = !normalizedQuery || name.includes(normalizedQuery) || location.includes(normalizedQuery);
+
+      if (!matchesQuery) return false;
+      if (!selectedCategoryLower) return true;
+
+      if (selectedCategoryId !== null && typeof selectedCategoryId !== 'undefined') {
+        return String(row.category_id ?? '') === String(selectedCategoryId);
+      }
+
+      return normalizeCategoryName(row.categories?.name) === selectedCategoryLower;
+    });
+
+    setPopular(next);
+  }, [allDestinations, normalizeSearchValue, searchText, selectedCategoryId, selectedCategoryName]);
+
+  const onChangeCategory = useCallback((id: string) => {
+    if (!isHomeCategoryValue(id)) return;
+    setSelectedCategory(id);
+  }, []);
 
   const fetchPersonalizedRecommendations = useCallback(async () => {
     setLoadingPersonalized(true);
@@ -411,6 +681,76 @@ export default function HomeScreen() {
     );
   }, []);
 
+  const onPressHomeEvent = useCallback((event: EventRow) => {
+    router.push(`/event/${event.id}` as any);
+  }, []);
+
+  const onShareHomeEvent = useCallback((event: EventRow) => {
+    setShareEvent(event);
+  }, []);
+
+  const closeShareModal = useCallback(() => {
+    setShareEvent(null);
+  }, []);
+
+  const onToggleHomeEventBookmark = useCallback(async (eventId: string, nextBookmarked: boolean) => {
+    const safeEventId = String(eventId ?? '').trim();
+    if (!safeEventId) return;
+
+    setHomeEventBookmarkPendingMap((prev) => ({
+      ...prev,
+      [safeEventId]: true,
+    }));
+    setHomeEventBookmarkMap((prev) => ({
+      ...prev,
+      [safeEventId]: nextBookmarked,
+    }));
+
+    try {
+      await eventBookmarkService.setBookmarked(safeEventId, nextBookmarked, currentUserId);
+    } catch (err: any) {
+      console.warn('onToggleHomeEventBookmark failed:', err?.message ?? err);
+      setHomeEventBookmarkMap((prev) => ({
+        ...prev,
+        [safeEventId]: !nextBookmarked,
+      }));
+      Alert.alert(t('common.notification'), t('event.detail.bookmarkToggleFailed'));
+    } finally {
+      setHomeEventBookmarkPendingMap((prev) => {
+        const next = { ...prev };
+        delete next[safeEventId];
+        return next;
+      });
+    }
+  }, [currentUserId, t]);
+
+  const onPressViewAllFestivals = useCallback(() => {
+    router.push('/festivals' as any);
+  }, []);
+
+  const onHomeScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+    const distanceToBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+
+    if (!Number.isFinite(distanceToBottom) || distanceToBottom > HOME_PRELOAD_THRESHOLD_PX) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - preloadTickRef.current < 220) {
+      return;
+    }
+    preloadTickRef.current = now;
+
+    if (hasMoreDestinations) {
+      void loadMoreDestinations();
+    }
+
+    if (hasMoreHomeEvents) {
+      void loadMoreHomeEvents();
+    }
+  }, [hasMoreDestinations, hasMoreHomeEvents, loadMoreDestinations, loadMoreHomeEvents]);
+
   const refreshPendingReminders = useCallback(async () => {
     try {
       const count = await reminderService.countPendingRemindersForCurrentUser();
@@ -424,7 +764,7 @@ export default function HomeScreen() {
   useEffect(() => {
     let mounted = true;
     const run = async () => {
-      await Promise.all([fetchProfile(), fetchDestinations()]);
+      await Promise.all([fetchProfile(), fetchDestinations(), fetchHomeEvents()]);
     };
 
     run().catch(() => {
@@ -435,7 +775,7 @@ export default function HomeScreen() {
       mounted = false;
       void mounted;
     };
-  }, [fetchDestinations, fetchProfile]);
+  }, [fetchDestinations, fetchHomeEvents, fetchProfile]);
 
   useEffect(() => {
     return () => {
@@ -642,7 +982,6 @@ export default function HomeScreen() {
     () =>
       popular
         .filter((d) => !!d.image_url)
-        .slice(0, 12)
         .map((d) => ({
           id: d.id,
           name: d.name,
@@ -654,6 +993,11 @@ export default function HomeScreen() {
     [popular, toDisplayPrice]
   );
 
+  const featuredForDisplay = useMemo(() => {
+    if (selectedCategory === 'all') return featured;
+    return popular.find((item) => !!item.image_url) ?? null;
+  }, [featured, popular, selectedCategory]);
+
   const personalizedItems = useMemo<YouMightAlsoLikeItem[]>(
     () =>
       (personalized?.combined ?? []).map((item) => ({
@@ -664,6 +1008,7 @@ export default function HomeScreen() {
   );
 
   const activeTimeOfDay = personalized?.timeOfDay ?? effectiveTimeOfDay;
+  const isLoadingMoreContent = loadingMoreDestinations || loadingMoreHomeEvents;
 
   return (
     <LinearGradient colors={gradientColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.mainContainer}>
@@ -678,7 +1023,12 @@ export default function HomeScreen() {
         {isLoading ? (
           <View style={[styles.loadingIndicator, { pointerEvents: 'none' }]} />
         ) : null}
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          onScroll={onHomeScroll}
+          scrollEventThrottle={16}
+        >
           <View style={styles.pageContent}>
             <Header
               styles={styles}
@@ -705,28 +1055,30 @@ export default function HomeScreen() {
               styles={styles}
               isDarkMode={isDark}
               categories={categoryItems}
+              activeId={selectedCategory}
               initialActiveId={categoryItems[0]?.id}
+              onChange={onChangeCategory}
             />
 
-            {featured ? (
+            {featuredForDisplay ? (
               <FeaturedDestination
                 styles={styles}
-                title={featured.name}
-                location={featured.location}
-                price={toDisplayPrice(featured.price) || '—'}
-                rating={toRating(featured.rating)}
-                imageUrl={featured.image_url ?? ''}
+                title={featuredForDisplay.name}
+                location={featuredForDisplay.location}
+                price={toDisplayPrice(featuredForDisplay.price) || '—'}
+                rating={toRating(featuredForDisplay.rating)}
+                imageUrl={featuredForDisplay.image_url ?? ''}
                 onPress={() => {
                   router.push(
                     {
                       pathname: '/destination/[id]',
                       params: {
-                        id: String(featured.id),
-                        name: featured.name,
-                        location: featured.location,
-                        price: toDisplayPrice(featured.price) || '—',
-                        rating: String(toRating(featured.rating)),
-                        imageUrl: featured.image_url ?? '',
+                        id: String(featuredForDisplay.id),
+                        name: featuredForDisplay.name,
+                        location: featuredForDisplay.location,
+                        price: toDisplayPrice(featuredForDisplay.price) || '—',
+                        rating: String(toRating(featuredForDisplay.rating)),
+                        imageUrl: featuredForDisplay.image_url ?? '',
                       },
                     } as any
                   );
@@ -747,14 +1099,46 @@ export default function HomeScreen() {
               onPressItem={onPressPersonalizedItem}
             />
 
+            <FestivalHighlights
+              events={homeEvents}
+              loading={loadingHomeEvents}
+              bookmarkedMap={homeEventBookmarkMap}
+              bookmarkPendingMap={homeEventBookmarkPendingMap}
+              onPressEvent={onPressHomeEvent}
+              onShareEvent={onShareHomeEvent}
+              onToggleBookmark={onToggleHomeEventBookmark}
+              onPressViewAll={onPressViewAllFestivals}
+            />
+
             <PopularDestinations
               styles={styles}
               destinations={popularItems}
             />
 
+            {isLoadingMoreContent ? (
+              <View
+                style={{
+                  marginTop: 8,
+                  marginBottom: 8,
+                  minHeight: 28,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ActivityIndicator size="small" color={ExploreEaseColors.primary} />
+              </View>
+            ) : null}
+
             <View style={{ height: 48 }} />
           </View>
         </ScrollView>
+
+        <FestivalShareModal
+          visible={!!shareEvent}
+          event={shareEvent}
+          currentUserId={currentUserId}
+          onClose={closeShareModal}
+        />
       </SafeAreaView>
     </LinearGradient>
   );

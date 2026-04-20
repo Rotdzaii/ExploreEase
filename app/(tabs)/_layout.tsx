@@ -2,13 +2,30 @@ import { NotificationPopover } from '@/components/notifications/NotificationPopo
 import { useAuth } from '@/src/context/auth';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
+import { supabase } from '@/src/services/supabase';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
+import { confirmDestructiveAction } from '@/src/utils/confirm';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { router, Tabs } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Keyboard, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const releaseOverlayTriggerFocus = () => {
+  Keyboard.dismiss();
+
+  if (Platform.OS !== 'web') return;
+
+  try {
+    const activeElement = (globalThis as any)?.document?.activeElement as { blur?: () => void } | null | undefined;
+    if (activeElement && typeof activeElement.blur === 'function') {
+      activeElement.blur();
+    }
+  } catch {
+    // Ignore focus release failures on unsupported environments.
+  }
+};
 
 export default function TabLayout() {
   const { session } = useAuth();
@@ -19,8 +36,10 @@ export default function TabLayout() {
   const notifications = useNotificationStore((s) => s.notifications);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const markRead = useNotificationStore((s) => s.markRead);
+  const clearAllLocalNotifications = useNotificationStore((s) => s.clearAll);
 
   const [isPopoverVisible, setIsPopoverVisible] = useState(false);
+  const [isClearingAllNotifications, setIsClearingAllNotifications] = useState(false);
 
   const tabBgColor = isDark ? 'rgba(26, 38, 55, 0.95)' : '#ffffff';
   const tabBorderColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
@@ -94,7 +113,13 @@ export default function TabLayout() {
   );
 
   const togglePopover = useCallback(() => {
-    setIsPopoverVisible((prev) => !prev);
+    setIsPopoverVisible((prev) => {
+      const next = !prev;
+      if (next) {
+        releaseOverlayTriggerFocus();
+      }
+      return next;
+    });
   }, []);
 
   const closePopover = useCallback(() => {
@@ -112,6 +137,44 @@ export default function TabLayout() {
   const onPressViewAll = useCallback(() => {
     setIsPopoverVisible(false);
     router.push('/notifications' as any);
+  }, []);
+
+  const onPressClearAllNotifications = useCallback(async () => {
+    if (isClearingAllNotifications) return;
+
+    const confirmed = await confirmDestructiveAction({
+      title: t('notifications.clearAllConfirmTitle'),
+      message: t('notifications.clearAllConfirmMessage'),
+      confirmText: t('notifications.clearAllConfirmAction'),
+      cancelText: t('common.cancel'),
+    });
+
+    if (!confirmed) return;
+
+    setIsClearingAllNotifications(true);
+
+    try {
+      const userId = session?.user?.id;
+      if (userId) {
+        const { error } = await supabase
+          .from('notifications')
+          .delete()
+          .eq('user_id', userId);
+
+        if (error) throw error;
+      }
+
+      clearAllLocalNotifications();
+    } catch (err: any) {
+      console.warn('clearAllNotifications failed:', err?.message ?? err);
+    } finally {
+      setIsClearingAllNotifications(false);
+    }
+  }, [clearAllLocalNotifications, isClearingAllNotifications, session?.user?.id, t]);
+
+  const onPressInbox = useCallback(() => {
+    setIsPopoverVisible(false);
+    router.push('/messages' as any);
   }, []);
 
   if (!session) {
@@ -172,33 +235,52 @@ export default function TabLayout() {
       </Tabs>
 
       <View pointerEvents="box-none" style={styles.overlayLayer}>
-        <Pressable
-          onPress={togglePopover}
-          style={({ pressed, hovered }) => [
-            styles.bellButton,
-            {
-              top: bellTop,
-              backgroundColor: isDark ? 'rgba(15, 23, 42, 0.82)' : 'rgba(255, 255, 255, 0.9)',
-              borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15, 23, 42, 0.10)',
-            },
-            Platform.OS === 'web' && hovered ? { opacity: 0.98, transform: [{ scale: 1.03 }] } : null,
-            pressed ? { opacity: 0.85, transform: [{ scale: 0.98 }] } : null,
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel={
-            unreadCount > 0
-              ? t('home.notificationsWithCount', { count: unreadCount })
-              : t('home.notifications')
-          }
-        >
-          <MaterialCommunityIcons name="bell-outline" size={20} color={activeColor} />
+        <View style={[styles.topActionsRow, { top: bellTop }]}> 
+          <Pressable
+            onPress={onPressInbox}
+            style={({ pressed, hovered }) => [
+              styles.iconButton,
+              {
+                backgroundColor: isDark ? 'rgba(15, 23, 42, 0.82)' : 'rgba(255, 255, 255, 0.9)',
+                borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15, 23, 42, 0.10)',
+              },
+              Platform.OS === 'web' && hovered ? { opacity: 0.98, transform: [{ scale: 1.03 }] } : null,
+              pressed ? { opacity: 0.85, transform: [{ scale: 0.98 }] } : null,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={t('messages.list.title')}
+          >
+            <MaterialCommunityIcons name="message-text-outline" size={20} color={activeColor} />
+          </Pressable>
 
-          {unreadCount > 0 ? (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{badgeText}</Text>
-            </View>
-          ) : null}
-        </Pressable>
+          <Pressable
+            onPress={togglePopover}
+            style={({ pressed, hovered }) => [
+              styles.iconButton,
+              styles.bellButton,
+              {
+                backgroundColor: isDark ? 'rgba(15, 23, 42, 0.82)' : 'rgba(255, 255, 255, 0.9)',
+                borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15, 23, 42, 0.10)',
+              },
+              Platform.OS === 'web' && hovered ? { opacity: 0.98, transform: [{ scale: 1.03 }] } : null,
+              pressed ? { opacity: 0.85, transform: [{ scale: 0.98 }] } : null,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={
+              unreadCount > 0
+                ? t('home.notificationsWithCount', { count: unreadCount })
+                : t('home.notifications')
+            }
+          >
+            <MaterialCommunityIcons name="bell-outline" size={20} color={activeColor} />
+
+            {unreadCount > 0 ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{badgeText}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
       </View>
 
       <NotificationPopover
@@ -210,6 +292,9 @@ export default function TabLayout() {
         onClose={closePopover}
         onPressNotification={onPressNotification}
         onPressViewAll={onPressViewAll}
+        onPressClearAll={onPressClearAllNotifications}
+        isClearingAll={isClearingAllNotifications}
+        canClearAll={notifications.length > 0}
       />
     </View>
   );
@@ -227,15 +312,23 @@ const styles = StyleSheet.create({
     zIndex: 1200,
     elevation: 1200,
   },
-  bellButton: {
+  topActionsRow: {
     position: 'absolute',
     right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  iconButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  bellButton: {
+    position: 'relative',
   },
   badge: {
     position: 'absolute',

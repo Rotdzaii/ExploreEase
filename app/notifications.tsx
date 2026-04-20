@@ -2,6 +2,8 @@ import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import { supabase } from '@/src/services/supabase';
+import { useNotificationStore } from '@/src/store/useNotificationStore';
+import { confirmDestructiveAction } from '@/src/utils/confirm';
 import { Feather } from '@expo/vector-icons';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { router } from 'expo-router';
@@ -75,6 +77,8 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [isMarkingAll, setIsMarkingAll] = useState(false);
+  const [isClearingAll, setIsClearingAll] = useState(false);
+  const clearAllLocalNotifications = useNotificationStore((s) => s.clearAll);
 
   const opacity = useRef(new Animated.Value(0)).current;
 
@@ -149,6 +153,40 @@ export default function NotificationsScreen() {
       setIsMarkingAll(false);
     }
   }, [notifications, userId]);
+
+  const clearAllNotifications = useCallback(async () => {
+    if (isClearingAll) return;
+
+    const confirmed = await confirmDestructiveAction({
+      title: t('notifications.clearAllConfirmTitle'),
+      message: t('notifications.clearAllConfirmMessage'),
+      confirmText: t('notifications.clearAllConfirmAction'),
+      cancelText: t('common.cancel'),
+    });
+
+    if (!confirmed) return;
+
+    const prev = notifications;
+    setIsClearingAll(true);
+    setNotifications([]);
+    clearAllLocalNotifications();
+
+    try {
+      if (userId) {
+        const { error } = await supabase
+          .from('notifications')
+          .delete()
+          .eq('user_id', userId);
+
+        if (error) throw error;
+      }
+    } catch (err: any) {
+      console.warn('clearAllNotifications failed:', err?.message ?? err);
+      setNotifications(prev);
+    } finally {
+      setIsClearingAll(false);
+    }
+  }, [clearAllLocalNotifications, isClearingAll, notifications, t, userId]);
 
   useEffect(() => {
     opacity.stopAnimation();
@@ -377,24 +415,45 @@ export default function NotificationsScreen() {
             </Text>
           </View>
 
-          <Pressable
-            onPress={() => void markAllRead()}
-            disabled={loading || isMarkingAll || unreadCount === 0}
-            style={({ pressed }) => [
-              styles.markAllBtn,
-              {
-                borderColor: colors.border,
-                backgroundColor: colors.cardBg,
-                opacity: loading || isMarkingAll || unreadCount === 0 ? 0.45 : pressed ? 0.82 : 1,
-              },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={t('notifications.markAllReadAccessibility')}
-          >
-            <Text style={{ color: colors.title, fontWeight: '800', fontSize: s(11) }}>
-              {isMarkingAll ? t('notifications.markAllUpdating') : t('notifications.markAllDone')}
-            </Text>
-          </Pressable>
+          <View style={styles.headerActionsRow}>
+            <Pressable
+              onPress={() => void markAllRead()}
+              disabled={loading || isMarkingAll || unreadCount === 0 || isClearingAll}
+              style={({ pressed }) => [
+                styles.markAllBtn,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: colors.cardBg,
+                  opacity: loading || isMarkingAll || unreadCount === 0 || isClearingAll ? 0.45 : pressed ? 0.82 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={t('notifications.markAllReadAccessibility')}
+            >
+              <Text style={{ color: colors.title, fontWeight: '800', fontSize: s(11) }}>
+                {isMarkingAll ? t('notifications.markAllUpdating') : t('notifications.markAllDone')}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => void clearAllNotifications()}
+              disabled={loading || isClearingAll || notifications.length === 0}
+              style={({ pressed }) => [
+                styles.clearAllBtn,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: colors.cardBg,
+                  opacity: loading || isClearingAll || notifications.length === 0 ? 0.45 : pressed ? 0.82 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={t('notifications.clearAllAccessibility')}
+            >
+              <Text style={{ color: colors.title, fontWeight: '800', fontSize: s(11) }}>
+                {isClearingAll ? t('notifications.clearAllUpdating') : t('notifications.clearAll')}
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         <Animated.View style={{ flex: 1, opacity, maxWidth: contentMaxWidth, alignSelf: 'center', width: '100%' }}>
@@ -504,6 +563,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
+  },
+  clearAllBtn: {
+    minWidth: 88,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  headerActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   emptyWrap: {
     borderWidth: 1,

@@ -12,7 +12,22 @@ import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useMemo } from 'react';
-import { ActivityIndicator, Image, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Keyboard, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+
+const releaseOverlayTriggerFocus = () => {
+  Keyboard.dismiss();
+
+  if (Platform.OS !== 'web') return;
+
+  try {
+    const activeElement = (globalThis as any)?.document?.activeElement as { blur?: () => void } | null | undefined;
+    if (activeElement && typeof activeElement.blur === 'function') {
+      activeElement.blur();
+    }
+  } catch {
+    // Ignore focus release failures on unsupported environments.
+  }
+};
 
 export default function ProfileScreen() {
   const { isDark, toggleColorScheme } = useTheme();
@@ -409,7 +424,10 @@ export default function ProfileScreen() {
 
             {/* Language */}
             <Pressable
-              onPress={() => setLanguageModalVisible(true)}
+              onPress={() => {
+                releaseOverlayTriggerFocus();
+                setLanguageModalVisible(true);
+              }}
               style={({ pressed }) => [styles.settingRow, { borderColor: colors.border, opacity: pressed ? 0.85 : 1 }]}
               accessibilityRole="button"
               accessibilityLabel={t('profile.settings.language')}
