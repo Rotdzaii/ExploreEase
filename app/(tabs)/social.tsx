@@ -78,6 +78,10 @@ const getActivityDescription = (item: SocialFeedItem, t: TranslateFn) => {
     return t('social.feed.activity.message', { actor: item.actorName });
   }
 
+  if (item.actionType === 'trip_save') {
+    return t('social.feed.activity.tripSave', { actor: item.actorName });
+  }
+
   return t('social.feed.activity.generic', { actor: item.actorName });
 };
 
@@ -87,6 +91,7 @@ const iconNameByAction: Record<SocialFeedItem['actionType'], React.ComponentProp
   attend_event: 'calendar',
   follow: 'user-plus',
   message: 'message-circle',
+  trip_save: 'map',
 };
 
 export default function SocialTabScreen() {

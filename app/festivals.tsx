@@ -5,7 +5,9 @@ import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import { eventBookmarkService } from '@/src/services/eventBookmarkService';
 import { eventService, type EventRow } from '@/src/services/eventService';
+import { syncBookmarkedEventReminderAsync } from '@/src/services/localNotificationService';
 import { supabase } from '@/src/services/supabase';
+import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -69,6 +71,7 @@ const isVietnamLocation = (value: string) => {
 export default function FestivalsScreen() {
   const { isDark } = useTheme();
   const { t } = useI18n();
+  const addNotification = useNotificationStore((s) => s.addNotification);
 
   const [activeTab, setActiveTab] = useState<FestivalTab>('vietnam');
   const [events, setEvents] = useState<EventRow[]>([]);
@@ -240,6 +243,8 @@ export default function FestivalsScreen() {
     const safeEventId = String(eventId ?? '').trim();
     if (!safeEventId) return;
 
+    const targetEvent = events.find((item) => item.id === safeEventId);
+
     setBookmarkPendingMap((prev) => ({
       ...prev,
       [safeEventId]: true,
@@ -251,6 +256,30 @@ export default function FestivalsScreen() {
 
     try {
       await eventBookmarkService.setBookmarked(safeEventId, nextBookmarked, currentUserId);
+
+      if (targetEvent) {
+        try {
+          await syncBookmarkedEventReminderAsync({
+            bookmarked: nextBookmarked,
+            eventId: targetEvent.id,
+            eventTitle: targetEvent.title,
+            startTime: targetEvent.start_time,
+            location: targetEvent.location,
+            userId: currentUserId,
+          });
+        } catch (reminderErr: any) {
+          console.warn('festivals bookmark reminder sync failed:', reminderErr?.message ?? reminderErr);
+        }
+
+        const eventTitle = targetEvent.title?.trim() || 'sự kiện này';
+        addNotification({
+          message: nextBookmarked
+            ? `Đã lưu sự kiện "${eventTitle}"`
+            : `Đã bỏ lưu sự kiện "${eventTitle}"`,
+          type: 'success',
+          durationMs: 2600,
+        });
+      }
     } catch (error: any) {
       console.warn('festivals onToggleBookmark failed:', error?.message ?? error);
       setBookmarkedMap((prev) => ({
@@ -265,7 +294,7 @@ export default function FestivalsScreen() {
         return next;
       });
     }
-  }, [currentUserId, t]);
+  }, [addNotification, currentUserId, events, t]);
 
   const emptyText = activeTab === 'vietnam'
     ? t('events.festivals.emptyVietnam')
@@ -287,6 +316,16 @@ export default function FestivalsScreen() {
           <Text style={[styles.title, { color: colors.title }]}>{t('events.festivals.title')}</Text>
           <Text style={[styles.subtitle, { color: colors.muted }]}>{t('events.festivals.subtitle')}</Text>
         </View>
+
+        <Pressable
+          onPress={() => router.push('/(tabs)/profile?openCreateEvent=1' as any)}
+          style={({ pressed }) => [styles.createBtn, pressed ? { opacity: 0.84 } : null]}
+          accessibilityRole="button"
+          accessibilityLabel="Tạo sự kiện mới"
+        >
+          <Feather name="plus" size={16} color="#ffffff" />
+          <Text style={styles.createBtnText}>Tạo sự kiện</Text>
+        </Pressable>
       </View>
 
       <View style={[styles.tabRow, { borderColor: colors.border }]}> 
@@ -391,6 +430,21 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  createBtn: {
+    minHeight: 38,
+    borderRadius: 12,
+    backgroundColor: ExploreEaseColors.primary,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  createBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '900',
   },
   title: {
     fontSize: 21,

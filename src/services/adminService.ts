@@ -269,7 +269,10 @@ export const adminService = {
 
     const { data, error } = await supabase
       .from('events')
-      .update({ approval_status: nextStatus })
+      .update({
+        approval_status: nextStatus,
+        status: nextStatus,
+      })
       .eq('id', id)
       .select('id, title, category, location, start_time, end_time, price, image_url, status, approval_status, creator_id, created_at')
       .single();

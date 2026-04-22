@@ -35,11 +35,15 @@ export function Header({
 
   return (
     <View style={styles.headerShell}>
-      <BlurView
-        intensity={isDarkMode ? 22 : 35}
-        tint={isDarkMode ? 'dark' : 'light'}
-        style={styles.headerBlurBg}
-      />
+      {Platform.OS === 'web' ? (
+        <View style={styles.headerBlurBg} />
+      ) : (
+        <BlurView
+          intensity={isDarkMode ? 22 : 35}
+          tint={isDarkMode ? 'dark' : 'light'}
+          style={styles.headerBlurBg}
+        />
+      )}
 
       <View style={styles.headerContentRow}>
         <View style={styles.userInfo}>

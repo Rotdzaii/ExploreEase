@@ -464,93 +464,83 @@ export default function TripsScreen() {
           />
         </>
       ) : (
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.container}>
-            <Text style={[styles.pageTitle, { color: colors.title }]}>{t('trips.title')}</Text>
-            <Text style={[styles.pageSubtitle, { color: colors.subtitle }]}>
-              {t('trips.subtitle')}
-            </Text>
-          </View>
+        <>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.container}>
+              <Text style={[styles.pageTitle, { color: colors.title }]}>{t('trips.title')}</Text>
+              <Text style={[styles.pageSubtitle, { color: colors.subtitle }]}>
+                {t('trips.subtitle')}
+              </Text>
+            </View>
 
-          <View style={styles.listWrap}>
-            {loadingTrips ? (
-              <View style={[styles.stateCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-                <Text style={[styles.stateTitle, { color: colors.title }]}>{t('trips.loadingTitle')}</Text>
-                <Text style={[styles.stateText, { color: colors.subtitle }]}>{t('trips.loadingSubtitle')}</Text>
-              </View>
-            ) : tripsError ? (
-              <View style={[styles.stateCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-                <Text style={[styles.stateTitle, { color: colors.title }]}>{tripsError}</Text>
-                <Text style={[styles.stateText, { color: colors.subtitle }]}>{t('trips.error.checkNetwork')}</Text>
-                <Pressable
-                  onPress={() => void loadTrips()}
-                  style={({ pressed, hovered }) => [
-                    styles.retryBtn,
-                    { backgroundColor: isDark ? 'rgba(34,211,238,0.12)' : 'rgba(34,211,238,0.12)' },
-                    hovered ? { opacity: 0.95 } : null,
-                    pressed ? { opacity: 0.85 } : null,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('trips.a11y.retryLoadList')}
-                >
-                  <Feather name="refresh-cw" size={16} color={ExploreEaseColors.primary} />
-                  <Text style={styles.retryText}>{t('common.retry')}</Text>
-                </Pressable>
-              </View>
-            ) : trips.length === 0 ? (
-              <View style={[styles.stateCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-                <Text style={[styles.stateTitle, { color: colors.title }]}>{t('trips.empty.title')}</Text>
-                <Text style={[styles.stateText, { color: colors.subtitle }]}>{t('trips.empty.subtitle')}</Text>
+            <View style={styles.listWrap}>
+              {loadingTrips ? (
+                <View style={[styles.stateCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+                  <Text style={[styles.stateTitle, { color: colors.title }]}>{t('trips.loadingTitle')}</Text>
+                  <Text style={[styles.stateText, { color: colors.subtitle }]}>{t('trips.loadingSubtitle')}</Text>
+                </View>
+              ) : tripsError ? (
+                <View style={[styles.stateCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+                  <Text style={[styles.stateTitle, { color: colors.title }]}>{tripsError}</Text>
+                  <Text style={[styles.stateText, { color: colors.subtitle }]}>{t('trips.error.checkNetwork')}</Text>
+                  <Pressable
+                    onPress={() => void loadTrips()}
+                    style={({ pressed, hovered }) => [
+                      styles.retryBtn,
+                      { backgroundColor: isDark ? 'rgba(34,211,238,0.12)' : 'rgba(34,211,238,0.12)' },
+                      hovered ? { opacity: 0.95 } : null,
+                      pressed ? { opacity: 0.85 } : null,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('trips.a11y.retryLoadList')}
+                  >
+                    <Feather name="refresh-cw" size={16} color={ExploreEaseColors.primary} />
+                    <Text style={styles.retryText}>{t('common.retry')}</Text>
+                  </Pressable>
+                </View>
+              ) : trips.length === 0 ? (
+                <View style={[styles.stateCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+                  <Text style={[styles.stateTitle, { color: colors.title }]}>{t('trips.empty.title')}</Text>
+                  <Text style={[styles.stateText, { color: colors.subtitle }]}>{t('trips.empty.subtitle')}</Text>
+                </View>
+              ) : (
+                trips.map((trip) => (
+                  <TripCard
+                    key={trip.id}
+                    title={trip.name}
+                    destination={trip.destination}
+                    startDate={trip.startDate}
+                    daysCount={trip.daysCount}
+                    coverUri={trip.cover}
+                    style={styles.card}
+                    onPress={() => handleSelectTrip(trip)}
+                  />
+                ))
+              )}
+            </View>
+          </ScrollView>
 
-                <Pressable
-                  onPress={() => void createTrip()}
-                  disabled={creatingTrip}
-                  style={({ pressed, hovered }) => [
-                    {
-                      marginTop: 6,
-                      height: 44,
-                      borderRadius: 14,
-                      paddingHorizontal: 12,
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 8,
-                      backgroundColor: ExploreEaseColors.primary,
-                      opacity: creatingTrip ? 0.7 : 1,
-                    },
-                    hovered ? { opacity: 0.95 } : null,
-                    pressed ? { opacity: 0.85 } : null,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('trips.a11y.createTrip')}
-                >
-                  {creatingTrip ? (
-                    <ActivityIndicator color="#001018" />
-                  ) : (
-                    <Feather name="plus" size={16} color="#001018" />
-                  )}
-                  <Text style={{ color: '#001018', fontSize: 13, fontWeight: '900' }}>{t('trips.createNew')}</Text>
-                </Pressable>
-              </View>
+          <Pressable
+            onPress={() => void createTrip()}
+            disabled={creatingTrip}
+            style={({ pressed }) => [
+              styles.fab,
+              creatingTrip ? { opacity: 0.72 } : null,
+              pressed ? { opacity: 0.84, transform: [{ scale: 0.98 }] } : null,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={t('trips.a11y.createTrip')}
+          >
+            {creatingTrip ? (
+              <ActivityIndicator color="#ffffff" />
             ) : (
-              trips.map((trip) => (
-                <TripCard
-                  key={trip.id}
-                  title={trip.name}
-                  destination={trip.destination}
-                  startDate={trip.startDate}
-                  daysCount={trip.daysCount}
-                  coverUri={trip.cover}
-                  style={styles.card}
-                  onPress={() => handleSelectTrip(trip)}
-                />
-              ))
+              <Feather name="plus" size={22} color="#ffffff" />
             )}
-          </View>
-        </ScrollView>
+          </Pressable>
+        </>
       )}
     </SafeAreaView>
   );
@@ -593,6 +583,22 @@ const styles = StyleSheet.create({
     color: ExploreEaseColors.primary,
     fontSize: 13,
     fontWeight: '900',
+  },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 96,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: ExploreEaseColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#0077B6',
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
   },
 
   detailHeader: {

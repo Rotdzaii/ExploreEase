@@ -135,7 +135,7 @@ export default function PublicUserProfileScreen() {
       return query;
     };
 
-    let result = await runQuery(!includePending);
+    let result: { data: any[] | null; error: any } = await runQuery(!includePending);
 
     if (result.error && hasMissingColumn(result.error, 'approval_status')) {
       result = await supabase

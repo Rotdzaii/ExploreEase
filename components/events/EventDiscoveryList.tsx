@@ -185,8 +185,8 @@ export function EventDiscoveryList({
             style={({ pressed, hovered }) => [
               styles.filterToggleBtn,
               {
-                backgroundColor: 'rgba(34, 211, 238, 0.12)',
-                borderColor: 'rgba(34, 211, 238, 0.30)',
+                backgroundColor: 'rgba(0, 119, 182, 0.12)',
+                borderColor: 'rgba(0, 119, 182, 0.30)',
               },
               hovered ? { opacity: 0.96 } : null,
               pressed ? { opacity: 0.84 } : null,
@@ -545,7 +545,7 @@ const styles = StyleSheet.create({
   imageWrap: {
     width: '100%',
     height: 178,
-    backgroundColor: 'rgba(34, 211, 238, 0.10)',
+    backgroundColor: 'rgba(0, 119, 182, 0.10)',
   },
   image: {
     width: '100%',
@@ -598,7 +598,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   freeBadge: {
-    backgroundColor: 'rgba(34, 211, 238, 0.92)',
+    backgroundColor: 'rgba(0, 180, 216, 0.92)',
   },
   priceText: {
     color: '#ffffff',
@@ -635,9 +635,9 @@ const styles = StyleSheet.create({
   },
   statusPill: {
     borderRadius: 999,
-    backgroundColor: 'rgba(34, 211, 238, 0.12)',
+    backgroundColor: 'rgba(0, 119, 182, 0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(34, 211, 238, 0.32)',
+    borderColor: 'rgba(0, 119, 182, 0.32)',
     paddingHorizontal: 10,
     paddingVertical: 5,
   },

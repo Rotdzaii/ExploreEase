@@ -1,4 +1,5 @@
 import { NotificationPopover } from '@/components/notifications/NotificationPopover';
+import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useAuth } from '@/src/context/auth';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
@@ -44,7 +45,7 @@ export default function TabLayout() {
   const tabBgColor = isDark ? 'rgba(26, 38, 55, 0.95)' : '#ffffff';
   const tabBorderColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
   const inactiveColor = isDark ? '#9CA3AF' : '#6B7280';
-  const activeColor = '#22d3ee';
+  const activeColor = ExploreEaseColors.primary;
 
   const tabBarBottom = Math.max(20, insets.bottom + 10);
   const bellTop = Math.max(10, insets.top + 10);

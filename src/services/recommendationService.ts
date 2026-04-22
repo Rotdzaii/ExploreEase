@@ -369,6 +369,24 @@ const resolveWeatherLookupCandidates = (location: string) => {
     candidates.push(segments[segments.length - 1]);
   }
 
+  const asciiNormalized = normalized
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .trim();
+
+  if (asciiNormalized && asciiNormalized !== normalized) {
+    candidates.push(asciiNormalized);
+  }
+
+  const withCountryHints = unique(candidates).flatMap((item) => [
+    `${item}, VN`,
+    `${item}, Vietnam`,
+  ]);
+
+  candidates.push(...withCountryHints);
+
   return unique(candidates);
 };
 
@@ -405,8 +423,24 @@ const fetchWeatherContextByLocation = async (location: string): Promise<WeatherC
   const candidates = resolveWeatherLookupCandidates(trimmed);
   for (const candidate of candidates) {
     try {
-      const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(candidate)}&appid=${encodeURIComponent(OPEN_WEATHER_API_KEY)}&units=metric`;
-      const response = await fetch(url);
+      const geocodeUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(candidate)}&limit=1&appid=${encodeURIComponent(OPEN_WEATHER_API_KEY)}`;
+      const geocodeResponse = await fetch(geocodeUrl);
+      if (!geocodeResponse.ok) continue;
+
+      const geocodePayload = (await geocodeResponse.json()) as {
+        lat?: number;
+        lon?: number;
+        name?: string;
+      }[];
+
+      const latRaw = geocodePayload?.[0]?.lat;
+      const lonRaw = geocodePayload?.[0]?.lon;
+      const lat = typeof latRaw === 'number' && Number.isFinite(latRaw) ? latRaw : null;
+      const lon = typeof lonRaw === 'number' && Number.isFinite(lonRaw) ? lonRaw : null;
+      if (lat === null || lon === null) continue;
+
+      const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lon))}&appid=${encodeURIComponent(OPEN_WEATHER_API_KEY)}&units=metric`;
+      const response = await fetch(weatherUrl);
       if (!response.ok) continue;
 
       const payload = (await response.json()) as {
@@ -422,7 +456,7 @@ const fetchWeatherContextByLocation = async (location: string): Promise<WeatherC
       const timezone = typeof timezoneRaw === 'number' && Number.isFinite(timezoneRaw) ? timezoneRaw : null;
 
       const resolved = {
-        sourceLocation: candidate,
+        sourceLocation: geocodePayload?.[0]?.name ?? candidate,
         isWetWeather: isWetWeatherByCode(weatherCode, weatherMain),
         localHour: computeHourFromTimezoneOffset(timezone),
       } as WeatherContextSnapshot;

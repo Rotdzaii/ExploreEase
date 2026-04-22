@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { socialService } from './socialService';
 import { tripService, type TripRow } from './tripService';
 
 export type ItineraryItemRow = {
@@ -82,6 +83,16 @@ const isMissingColumnError = (error: unknown) => {
   return msg.includes('column') && msg.includes('does not exist');
 };
 
+const isMissingRelationError = (error: unknown) => {
+  const msg = toLowerMessage(error);
+  return (
+    (msg.includes('relation') && msg.includes('does not exist')) ||
+    (msg.includes('table') && msg.includes('does not exist'))
+  );
+};
+
+const TRIP_ITEM_TABLE_CANDIDATES = ['trip_items', 'itinerary_items'] as const;
+
 const toTimeText = (value?: string | null): string | null => {
   if (!value || !value.trim()) return null;
   const raw = value.trim();
@@ -135,16 +146,33 @@ const insertItemWithFallback = async (
 
   let lastError: any = null;
 
-  for (let i = 0; i < candidates.length; i += 1) {
-    const candidate = candidates[i];
-    const cleaned = Object.fromEntries(Object.entries(candidate).filter(([, value]) => value !== undefined));
+  for (const tableName of TRIP_ITEM_TABLE_CANDIDATES) {
+    let shouldTryNextTable = false;
 
-    const result = await supabase.from('itinerary_items').insert(cleaned).select('*').single();
-    if (!result.error) return result.data as ItineraryItemRow;
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      const cleaned = Object.fromEntries(Object.entries(candidate).filter(([, value]) => value !== undefined));
 
-    lastError = result.error;
+      const result = await supabase.from(tableName).insert(cleaned).select('*').single();
+      if (!result.error) return result.data as ItineraryItemRow;
 
-    if (!isMissingColumnError(result.error)) {
+      lastError = result.error;
+
+      if (isMissingRelationError(result.error)) {
+        shouldTryNextTable = true;
+        break;
+      }
+
+      if (!isMissingColumnError(result.error)) {
+        break;
+      }
+    }
+
+    if (shouldTryNextTable) {
+      continue;
+    }
+
+    if (lastError && !isMissingColumnError(lastError)) {
       break;
     }
   }
@@ -205,30 +233,46 @@ export const itineraryService = {
   async getItemsByTripAndDay(tripId: string, day: number) {
     const userId = await ensureAuthenticatedUserId();
 
-    const baseQuery = () =>
-      supabase
-        .from('itinerary_items')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('trip_id', tripId)
-        .eq('day', day);
+    let lastError: any = null;
 
-    // Prefer deterministic ordering for optimization: sort_order -> time.
-    const { data, error } = await baseQuery()
-      .order('sort_order', { ascending: true, nullsFirst: false })
-      .order('start_time', { ascending: true, nullsFirst: false });
+    for (const tableName of TRIP_ITEM_TABLE_CANDIDATES) {
+      const baseQuery = () =>
+        supabase
+          .from(tableName)
+          .select('*')
+          .eq('user_id', userId)
+          .eq('trip_id', tripId)
+          .eq('day', day);
 
-    if (!error) return (data ?? []) as ItineraryItemRow[];
+      const ordered = await baseQuery()
+        .order('sort_order', { ascending: true, nullsFirst: false })
+        .order('start_time', { ascending: true, nullsFirst: false });
 
-    // Backward-compatible fallback in case the DB schema doesn't have sort_order yet.
-    const msg = (error as any)?.message as string | undefined;
-    if (msg && msg.toLowerCase().includes('sort_order') && msg.toLowerCase().includes('does not exist')) {
-      const fallback = await baseQuery().order('start_time', { ascending: true, nullsFirst: false });
-      if (fallback.error) throw fallback.error;
-      return (fallback.data ?? []) as ItineraryItemRow[];
+      if (!ordered.error) return (ordered.data ?? []) as ItineraryItemRow[];
+
+      lastError = ordered.error;
+
+      if (isMissingRelationError(ordered.error)) {
+        continue;
+      }
+
+      const msg = (ordered.error as any)?.message as string | undefined;
+      if (msg && msg.toLowerCase().includes('sort_order') && msg.toLowerCase().includes('does not exist')) {
+        const fallback = await baseQuery().order('start_time', { ascending: true, nullsFirst: false });
+        if (!fallback.error) return (fallback.data ?? []) as ItineraryItemRow[];
+        lastError = fallback.error;
+
+        if (isMissingRelationError(fallback.error)) {
+          continue;
+        }
+      }
+
+      if (!isMissingColumnError(lastError)) {
+        break;
+      }
     }
 
-    throw error;
+    throw lastError;
   },
 
   async getOrCreateItinerary(tripId: string) {
@@ -336,7 +380,19 @@ export const itineraryService = {
       time_slot: input.time_slot ?? null,
     };
 
-    return insertItemWithFallback(payload);
+    const inserted = await insertItemWithFallback(payload);
+
+    try {
+      await socialService.logActivity({
+        actionType: 'trip_save',
+        targetId: input.tripId,
+        targetType: 'trip',
+      });
+    } catch (error: any) {
+      console.warn('addItemToTrip social log failed:', error?.message ?? error);
+    }
+
+    return inserted;
   },
 
   async addDestinationToTripDay(input: AddDestinationToTripDayInput): Promise<ItineraryItemRow> {
@@ -378,6 +434,18 @@ export const itineraryService = {
       time_slot: input.time_slot ?? null,
     };
 
-    return insertItemWithFallback(payload);
+    const inserted = await insertItemWithFallback(payload);
+
+    try {
+      await socialService.logActivity({
+        actionType: 'trip_save',
+        targetId: input.tripId,
+        targetType: 'trip',
+      });
+    } catch (error: any) {
+      console.warn('addEventToTripDay social log failed:', error?.message ?? error);
+    }
+
+    return inserted;
   },
 };
