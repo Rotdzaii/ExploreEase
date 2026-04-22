@@ -1,7 +1,8 @@
 import { supabase } from './supabase';
 
 export type EventStatus = 'incoming' | 'ongoing' | 'completed';
-export type EventApprovalStatus = 'pending' | 'approved' | 'rejected';
+export type EventModerationStatus = 'pending' | 'approved' | 'rejected';
+export type EventApprovalStatus = EventModerationStatus;
 
 export type EventRow = {
   id: string;
@@ -14,12 +15,15 @@ export type EventRow = {
   image_url?: string | null;
   description?: string | null;
   status: EventStatus;
+  moderation_status?: EventModerationStatus | null;
   approval_status?: EventApprovalStatus | null;
   latitude?: number | null;
   longitude?: number | null;
   lat?: number | null;
   lng?: number | null;
   creator_id: string;
+  created_by?: string | null;
+  region?: string | null;
   created_at?: string | null;
 };
 
@@ -60,7 +64,7 @@ export type UpdateEventInput = {
   price?: number;
   image_url?: string | null;
   description?: string | null;
-  status?: EventStatus;
+  status?: EventModerationStatus;
 };
 
 const ensureAuthenticatedUserId = async (): Promise<string> => {
@@ -121,6 +125,15 @@ const isMissingColumnError = (error: unknown, columnName: string) => {
   return message.includes('does not exist') && message.includes(columnName.toLowerCase());
 };
 
+const normalizeModerationStatus = (value: unknown): EventModerationStatus | null => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'pending' || normalized === 'approved' || normalized === 'rejected') {
+    return normalized;
+  }
+
+  return null;
+};
+
 export const getEventStatusByTime = (
   startTimeValue: string | Date,
   endTimeValue: string | Date,
@@ -135,10 +148,19 @@ export const getEventStatusByTime = (
   return 'ongoing';
 };
 
-const withLiveStatus = (row: EventRow): EventRow => ({
-  ...row,
-  status: getEventStatusByTime(row.start_time, row.end_time),
-});
+const withLiveStatus = (row: EventRow): EventRow => {
+  const moderationStatus =
+    normalizeModerationStatus((row as any)?.status) ??
+    normalizeModerationStatus(row.approval_status) ??
+    'pending';
+
+  return {
+    ...row,
+    moderation_status: moderationStatus,
+    approval_status: moderationStatus,
+    status: getEventStatusByTime(row.start_time, row.end_time),
+  };
+};
 
 export const eventService = {
   async getDistinctCategories(limit: number = 100): Promise<string[]> {
@@ -292,7 +314,6 @@ export const eventService = {
       throw new Error('end_time must be greater than start_time');
     }
 
-    const status = getEventStatusByTime(startTimeIso, endTimeIso);
     const description = typeof input.description === 'string' ? input.description.trim() : '';
 
     const payload = {
@@ -304,9 +325,11 @@ export const eventService = {
       price: normalizeMoney(input.price),
       image_url: input.image_url ?? null,
       description: description || null,
-      status,
+      status: 'pending' as const,
       approval_status: 'pending' as const,
       creator_id: creatorId,
+      created_by: creatorId,
+      region: null,
     };
 
     const { data, error } = await supabase.from('events').insert(payload).select('*').single();
@@ -378,8 +401,9 @@ export const eventService = {
       throw new Error('end_time must be greater than start_time');
     }
 
-    if (!input.status) {
-      payload.status = getEventStatusByTime(nextStart, nextEnd);
+    if (input.status) {
+      payload.status = input.status;
+      payload.approval_status = input.status;
     }
 
     const { data, error } = await supabase
@@ -406,7 +430,10 @@ export const eventService = {
 
     const { data, error } = await supabase
       .from('events')
-      .update({ approval_status: nextStatus })
+      .update({
+        approval_status: nextStatus,
+        status: nextStatus,
+      })
       .eq('id', id)
       .select('*')
       .single();

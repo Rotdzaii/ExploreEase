@@ -25,6 +25,7 @@ import {
 import { TimeOfDayToggle } from '@/components/home/TimeOfDayToggle';
 import { YouMightAlsoLike, type YouMightAlsoLikeItem } from '@/components/home/YouMightAlsoLike';
 import { ModerationModal, RatingDistribution, ReviewCard, ReviewForm } from '@/components/reviews';
+import { QrShareModal } from '@/components/share/QrShareModal';
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useLocation } from '@/hooks/useLocation';
 import { useNetwork } from '@/hooks/useNetwork';
@@ -37,11 +38,13 @@ import { itineraryService } from '@/src/services/itineraryService';
 import { offlineSyncService } from '@/src/services/offlineSyncService';
 import { recommendationService, resolveTimeOfDayPreference, type PersonalizedRecommendationsResult } from '@/src/services/recommendationService';
 import { reviewService } from '@/src/services/reviewService';
+import { socialService } from '@/src/services/socialService';
 import { storageService } from '@/src/services/storageService';
 import { supabase } from '@/src/services/supabase';
 import { tripService, type TripRow } from '@/src/services/tripService';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { useRecommendationPreferencesStore } from '@/src/store/useRecommendationPreferencesStore';
+import { buildDestinationShareUrl } from '@/src/utils/shareLinks';
 import { parseMoneyToNumber } from '@/utils/format';
 import { formatDistance, getHaversineDistance } from '@/utils/location';
 import { BlurView } from 'expo-blur';
@@ -276,10 +279,26 @@ export default function DestinationDetailScreen() {
   const [isNoTripsModalOpen, setIsNoTripsModalOpen] = useState(false);
   const [creatingTripAndAdding, setCreatingTripAndAdding] = useState(false);
   const [isTripPickerModalOpen, setIsTripPickerModalOpen] = useState(false);
+  const [qrShareVisible, setQrShareVisible] = useState(false);
   const [loadingRecommendations, setLoadingRecommendations] = useState(false);
   const [recommendations, setRecommendations] = useState<PersonalizedRecommendationsResult | null>(null);
 
   const addNotification = useNotificationStore((s) => s.addNotification);
+  const destinationDisplayName = useMemo(
+    () => String(destinationRow?.name ?? destinationRow?.title ?? name).trim() || 'địa điểm này',
+    [destinationRow?.name, destinationRow?.title, name]
+  );
+  const qrSharePayload = useMemo(() => {
+    const qrValue = buildDestinationShareUrl({
+      id: destinationId,
+      name: destinationDisplayName,
+    });
+
+    return {
+      qrValue,
+      shareMessage: `Khám phá địa điểm "${destinationDisplayName}" tại ExploreEase:\n${qrValue}`,
+    };
+  }, [destinationDisplayName, destinationId]);
   const effectiveRecommendationTimeOfDay = useMemo(
     () => resolveTimeOfDayPreference(timeOfDayPreference),
     [timeOfDayPreference]
@@ -524,7 +543,7 @@ export default function DestinationDetailScreen() {
       setIsNoTripsModalOpen(false);
 
       addNotification({
-        message: t('destination.trip.addedSuccess'),
+        message: `Đã thêm "${itemName}" vào kế hoạch`,
         type: 'success',
         durationMs: 3000,
       });
@@ -572,7 +591,7 @@ export default function DestinationDetailScreen() {
 
       closeTripPicker();
       addNotification({
-        message: t('destination.trip.addedSuccess'),
+        message: `Đã thêm "${itemName}" vào kế hoạch`,
         type: 'success',
         durationMs: 3000,
       });
@@ -719,6 +738,14 @@ export default function DestinationDetailScreen() {
       } else {
         await favoritesService.remove(destinationId);
       }
+
+      addNotification({
+        message: next
+          ? `Đã lưu địa điểm "${destinationDisplayName}"`
+          : `Đã bỏ lưu địa điểm "${destinationDisplayName}"`,
+        type: 'success',
+        durationMs: 2600,
+      });
     } catch (err) {
       console.warn('toggle favorite failed:', err);
       setIsFavorited(!next);
@@ -731,7 +758,7 @@ export default function DestinationDetailScreen() {
     } finally {
       setTogglingFavorite(false);
     }
-  }, [destinationId, isFavorited, t, togglingFavorite]);
+  }, [addNotification, destinationDisplayName, destinationId, isFavorited, t, togglingFavorite]);
 
   useEffect(() => {
     if (!destinationId) return;
@@ -1218,6 +1245,16 @@ export default function DestinationDetailScreen() {
         15000,
         t('review.error.submitFailed', { reason: t('review.error.uploadTimeout') })
       );
+
+      try {
+        await socialService.logActivity({
+          actionType: 'review',
+          targetId: destinationId,
+          targetType: 'destination',
+        });
+      } catch (activityError: any) {
+        console.warn('destination review activity log failed:', activityError?.message ?? activityError);
+      }
 
       setDraftComment('');
       setDraftRating(5);
@@ -2357,6 +2394,38 @@ export default function DestinationDetailScreen() {
 
                   <Pressable
                     onPress={() => {
+                      releaseOverlayTriggerFocus();
+                      setQrShareVisible(true);
+                    }}
+                    style={({ pressed, hovered }) => [
+                      styles.reviewFooterBtn,
+                      {
+                        height: s(52),
+                        paddingHorizontal: s(14),
+                        borderRadius: 999,
+                        borderColor: footerBorder,
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.04)',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: s(8),
+                        flexShrink: 1,
+                        flexGrow: isCompactFooterLayout ? 1 : 0,
+                        minWidth: isCompactFooterLayout ? 0 : s(126),
+                      },
+                      (Platform.OS === 'web' && hovered) ? { opacity: 0.96 } : null,
+                      pressed ? { opacity: 0.86, transform: [{ scale: 0.95 }] } : null,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Chia sẻ QR địa điểm"
+                  >
+                    <MaterialCommunityIcons name="qrcode" size={s(18)} color={ExploreEaseColors.primary} />
+                    <Text style={{ color: footerFg, fontWeight: '900', fontSize: s(13), flexShrink: 1 }} numberOfLines={1}>
+                      Chia sẻ QR
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => {
                       if (!destinationCoords) {
                         Alert.alert(t('destination.directions.title'), t('destination.directions.missingCoords'));
                         return;
@@ -2651,6 +2720,15 @@ export default function DestinationDetailScreen() {
             </View>
           </BottomSheet>
         ) : null}
+
+        <QrShareModal
+          visible={qrShareVisible}
+          title="Chia sẻ QR địa điểm"
+          subtitle="Quét mã để mở nhanh trang địa điểm này trên ExploreEase."
+          qrValue={qrSharePayload.qrValue}
+          shareMessage={qrSharePayload.shareMessage}
+          onClose={() => setQrShareVisible(false)}
+        />
 
       </View>
     </SafeAreaView>

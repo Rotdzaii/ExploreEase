@@ -1,11 +1,13 @@
 import { supabase } from './supabase';
+import * as Crypto from 'expo-crypto';
 
-export type ActivityActionType = 'review' | 'bookmark' | 'attend_event' | 'follow' | 'message';
+export type ActivityActionType = 'review' | 'bookmark' | 'attend_event' | 'follow' | 'message' | 'trip_save';
 export type ActivityTargetType =
   | 'destination'
   | 'event'
   | 'review'
   | 'event_review'
+  | 'trip'
   | 'user'
   | 'conversation'
   | 'message';
@@ -103,7 +105,16 @@ export type FollowStats = {
   followingCount: number;
 };
 
+type RelationshipTableName = 'relationships' | 'follows';
+type ActivityTableName = 'activity_logs' | 'activities';
+
+type SocialTableSnapshot = {
+  relationshipTable: RelationshipTableName;
+  activityTable: ActivityTableName;
+};
+
 const FALLBACK_NAME = 'Traveler';
+let cachedSocialTables: SocialTableSnapshot | null = null;
 
 const normalizeName = (raw: unknown, fallbackId?: string): string => {
   const trimmed = String(raw ?? '').trim();
@@ -129,6 +140,47 @@ const ensureAuthenticatedUserId = async (): Promise<string> => {
   if (!userId) throw new Error('Not authenticated');
 
   return userId;
+};
+
+const isMissingTableError = (error: unknown) => {
+  const code = String((error as any)?.code ?? '').trim();
+  const message = String((error as any)?.message ?? '').toLowerCase();
+  return (
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    message.includes('could not find the table') ||
+    (message.includes('does not exist') && (message.includes('relation') || message.includes('table')))
+  );
+};
+
+const resolveExistingTable = async <TTableName extends RelationshipTableName | ActivityTableName>(
+  candidates: readonly TTableName[],
+  selectColumn: string
+): Promise<TTableName> => {
+  for (const tableName of candidates) {
+    const result = await supabase.from(tableName).select(selectColumn).limit(1);
+    if (!result.error) return tableName;
+    if (isMissingTableError(result.error)) continue;
+    throw result.error;
+  }
+
+  return candidates[candidates.length - 1];
+};
+
+const getSocialTables = async (): Promise<SocialTableSnapshot> => {
+  if (cachedSocialTables) return cachedSocialTables;
+
+  const [relationshipTable, activityTable] = await Promise.all([
+    resolveExistingTable(['relationships', 'follows'] as const, 'follower_id'),
+    resolveExistingTable(['activity_logs', 'activities'] as const, 'id'),
+  ]);
+
+  cachedSocialTables = {
+    relationshipTable,
+    activityTable,
+  };
+
+  return cachedSocialTables;
 };
 
 const fetchProfilesByIds = async (userIds: string[]): Promise<Map<string, ProfilePreview>> => {
@@ -190,6 +242,14 @@ const compareIsoDesc = (a: string | null, b: string | null) => {
 
   if (aTime === bTime) return 0;
   return aTime > bTime ? -1 : 1;
+};
+
+const createClientUuid = () => {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return Crypto.randomUUID();
 };
 
 const buildConversationSummaries = async (
@@ -309,20 +369,21 @@ const isUniqueViolationError = (error: unknown) => {
 const getFollowStatsInternal = async (currentUserId: string, targetUserId: string): Promise<FollowStats> => {
   const safeTargetUserId = String(targetUserId ?? '').trim();
   if (!safeTargetUserId) throw new Error('Missing user ID');
+  const { relationshipTable } = await getSocialTables();
 
   const [relationRes, followerCountRes, followingCountRes] = await Promise.all([
     supabase
-      .from('follows')
+      .from(relationshipTable)
       .select('follower_id')
       .eq('follower_id', currentUserId)
       .eq('following_id', safeTargetUserId)
       .maybeSingle(),
     supabase
-      .from('follows')
+      .from(relationshipTable)
       .select('following_id', { head: true, count: 'exact' })
       .eq('following_id', safeTargetUserId),
     supabase
-      .from('follows')
+      .from(relationshipTable)
       .select('follower_id', { head: true, count: 'exact' })
       .eq('follower_id', safeTargetUserId),
   ]);
@@ -399,33 +460,42 @@ const getOrCreateDirectConversationInternal = async (currentUserId: string, part
   const existingConversationId = await findDirectConversationId(currentUserId, safePartnerUserId);
   if (existingConversationId) return existingConversationId;
 
-  const { data: createdConversation, error: createConversationError } = await supabase
+  const conversationId = createClientUuid();
+
+  const { error: createConversationError } = await supabase
     .from('conversations')
     .insert({
+      id: conversationId,
       type: 'direct',
       event_id: null,
-    })
-    .select('id')
-    .single();
+    });
 
   if (createConversationError) throw createConversationError;
 
-  const conversationId = String((createdConversation as any)?.id ?? '').trim();
-  if (!conversationId) throw new Error('Unable to create direct conversation');
-
-  const { error: participantsError } = await supabase
+  const { error: selfParticipantError } = await supabase
     .from('conversation_participants')
-    .insert([
-      { conversation_id: conversationId, user_id: currentUserId },
-      { conversation_id: conversationId, user_id: safePartnerUserId },
-    ]);
+    .insert({
+      conversation_id: conversationId,
+      user_id: currentUserId,
+    });
 
-  if (participantsError) {
-    if (!isUniqueViolationError(participantsError)) throw participantsError;
+  if (selfParticipantError) {
+    throw selfParticipantError;
+  }
+
+  const { error: partnerParticipantError } = await supabase
+    .from('conversation_participants')
+    .insert({
+      conversation_id: conversationId,
+      user_id: safePartnerUserId,
+    });
+
+  if (partnerParticipantError) {
+    if (!isUniqueViolationError(partnerParticipantError)) throw partnerParticipantError;
 
     const dedupConversationId = await findDirectConversationId(currentUserId, safePartnerUserId);
     if (dedupConversationId) return dedupConversationId;
-    throw participantsError;
+    throw partnerParticipantError;
   }
 
   return conversationId;
@@ -434,11 +504,12 @@ const getOrCreateDirectConversationInternal = async (currentUserId: string, part
 export const socialService = {
   async getActivityFeed(limit: number = 40): Promise<SocialFeedItem[]> {
     await ensureAuthenticatedUserId();
+    const { activityTable } = await getSocialTables();
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(120, Math.floor(limit))) : 40;
 
     const { data, error } = await supabase
-      .from('activities')
+      .from(activityTable)
       .select('id, user_id, action_type, target_id, target_type, created_at')
       .order('created_at', { ascending: false })
       .limit(safeLimit);
@@ -482,12 +553,13 @@ export const socialService = {
     async followUser(targetUserId: string): Promise<FollowStats> {
       const currentUserId = await ensureAuthenticatedUserId();
       const safeTargetUserId = String(targetUserId ?? '').trim();
+      const { relationshipTable, activityTable } = await getSocialTables();
 
       if (!safeTargetUserId) throw new Error('Missing user ID');
       if (safeTargetUserId === currentUserId) throw new Error('Cannot follow yourself');
 
       const { error } = await supabase
-        .from('follows')
+        .from(relationshipTable)
         .insert({
           follower_id: currentUserId,
           following_id: safeTargetUserId,
@@ -495,7 +567,7 @@ export const socialService = {
 
       if (error && !isUniqueViolationError(error)) throw error;
 
-      const { error: activityError } = await supabase.from('activities').insert({
+      const { error: activityError } = await supabase.from(activityTable).insert({
         user_id: currentUserId,
         action_type: 'follow',
         target_id: safeTargetUserId,
@@ -512,6 +584,7 @@ export const socialService = {
     async unfollowUser(targetUserId: string): Promise<FollowStats> {
       const currentUserId = await ensureAuthenticatedUserId();
       const safeTargetUserId = String(targetUserId ?? '').trim();
+      const { relationshipTable } = await getSocialTables();
 
       if (!safeTargetUserId) throw new Error('Missing user ID');
       if (safeTargetUserId === currentUserId) {
@@ -519,7 +592,7 @@ export const socialService = {
       }
 
       const { error } = await supabase
-        .from('follows')
+        .from(relationshipTable)
         .delete()
         .eq('follower_id', currentUserId)
         .eq('following_id', safeTargetUserId);
@@ -631,6 +704,7 @@ export const socialService = {
 
   async sendTextMessage(conversationId: string, contentText: string): Promise<ConversationMessage> {
     const senderId = await ensureAuthenticatedUserId();
+    const { activityTable } = await getSocialTables();
 
     const safeConversationId = String(conversationId ?? '').trim();
     if (!safeConversationId) throw new Error('Missing conversation ID');
@@ -653,7 +727,7 @@ export const socialService = {
     if (error) throw error;
 
     // Keep social feed lively for message events even without a DB trigger.
-    const { error: activityError } = await supabase.from('activities').insert({
+    const { error: activityError } = await supabase.from(activityTable).insert({
       user_id: senderId,
       action_type: 'message',
       target_id: safeConversationId,
@@ -679,5 +753,26 @@ export const socialService = {
       mediaUrl: row.media_url,
       createdAt: row.created_at,
     };
+  },
+
+  async logActivity(input: {
+    actionType: ActivityActionType;
+    targetId: string;
+    targetType: ActivityTargetType;
+  }): Promise<void> {
+    const userId = await ensureAuthenticatedUserId();
+    const { activityTable } = await getSocialTables();
+
+    const targetId = String(input.targetId ?? '').trim();
+    if (!targetId) return;
+
+    const { error } = await supabase.from(activityTable).insert({
+      user_id: userId,
+      action_type: input.actionType,
+      target_id: targetId,
+      target_type: input.targetType,
+    });
+
+    if (error) throw error;
   },
 };

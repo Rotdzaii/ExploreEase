@@ -1,66 +1,68 @@
-import { CreateEventForm, type EventFormData } from '@/components/events/CreateEventForm';
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useLocation } from '@/hooks/useLocation';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import {
-    destinationService,
-    type DestinationDiscoveryRow,
-    type DiscoveryPriceFilter,
-    type DiscoveryQueryFilters,
-    type DiscoverySearchSuggestion,
-    type DiscoverySortOption,
-    type NearbyTopRatedRow,
-    type PersonalizedRecommendationRow,
-    type SmartSearchLocalizationSource,
+  destinationService,
+  type DestinationDiscoveryRow,
+  type DiscoveryPriceFilter,
+  type DiscoveryQueryFilters,
+  type DiscoverySearchSuggestion,
+  type DiscoverySortOption,
+  type NearbyTopRatedRow,
+  type PersonalizedRecommendationRow,
+  type SmartSearchLocalizationSource,
 } from '@/src/services/destinationService';
 import { eventService, type EventRow, type EventStatus } from '@/src/services/eventService';
-import { storageService } from '@/src/services/storageService';
+import { recommendationService, type PersonalizedSuggestionItem, type TimeOfDay } from '@/src/services/recommendationService';
 import { supabase } from '@/src/services/supabase';
 import { useLanguageStore } from '@/src/store/useLanguageStore';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
+import {
+  buildMicroItinerary,
+  parseExplorePrompt,
+  type ExploreMultiFactorCandidate,
+  type MicroItineraryStop,
+  type MultiFactorAvailableTime,
+  type MultiFactorBudget,
+  type MultiFactorDistance,
+  type MultiFactorMood,
+} from '@/src/utils/multiFactorExplore';
 import { parseMoneyToNumber } from '@/utils/format';
 import {
-    formatDistance,
-    geocodeLocationText,
-    getEffectiveTargetLocation,
-    getHaversineDistance,
-    resolveEntityCoords,
-    useLocationOverrideStore,
+  formatDistance,
+  geocodeLocationText,
+  getEffectiveTargetLocation,
+  getHaversineDistance,
+  resolveEntityCoords,
+  useLocationOverrideStore,
 } from '@/utils/location';
 import { Feather } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    ImageBackground,
-    Keyboard,
-    LayoutAnimation,
-    Modal,
-    NativeScrollEvent,
-    NativeSyntheticEvent,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TextInputSubmitEditingEventData,
-    TouchableOpacity,
-    UIManager,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  ImageBackground,
+  Keyboard,
+  LayoutAnimation,
+  Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TextInputSubmitEditingEventData,
+  TouchableOpacity,
+  UIManager,
+  View,
 } from 'react-native';
-
-const combineLocalDateTime = (dateText: string, timeText: string): Date | null => {
-  const dt = new Date(`${dateText.trim()}T${timeText.trim()}:00`);
-  if (Number.isNaN(dt.getTime())) return null;
-  return dt;
-};
 
 type CategoryRow = {
   id: string | number;
@@ -209,7 +211,17 @@ export default function ExploreScreen() {
   const nearbyTopRatedRequestSeqRef = useRef(0);
   const isLoading = loading || loadingMore;
 
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [multiFactorBudget, setMultiFactorBudget] = useState<MultiFactorBudget>('any');
+  const [multiFactorMood, setMultiFactorMood] = useState<MultiFactorMood>('any');
+  const [multiFactorAvailableTime, setMultiFactorAvailableTime] = useState<MultiFactorAvailableTime>('4h');
+  const [multiFactorDistance, setMultiFactorDistance] = useState<MultiFactorDistance>('any');
+  const [prioritizePersonalPreferences, setPrioritizePersonalPreferences] = useState(true);
+  const [microItineraryPrompt, setMicroItineraryPrompt] = useState('Gợi ý lịch trình 4 giờ buổi tối');
+  const [loadingMicroItinerary, setLoadingMicroItinerary] = useState(false);
+  const [microItineraryStops, setMicroItineraryStops] = useState<MicroItineraryStop[]>([]);
+  const [microItineraryCandidates, setMicroItineraryCandidates] = useState<ExploreMultiFactorCandidate[]>([]);
+  const [microItinerarySummary, setMicroItinerarySummary] = useState<{ totalHours: number; timeOfDay: TimeOfDay } | null>(null);
 
   const formatDateTimeText = useCallback((value: string | null | undefined) => {
     if (!value) return t('common.na');
@@ -243,6 +255,116 @@ export default function ExploreScreen() {
     if (fromRelation) return fromRelation;
     return t('explore.category.general');
   }, [t]);
+
+  const fallbackTimeOfDay = useMemo<TimeOfDay>(() => {
+    const hour = new Date().getHours();
+    if (hour < 11) return 'morning';
+    if (hour < 17) return 'afternoon';
+    if (hour < 21) return 'evening';
+    return 'night';
+  }, []);
+
+  const onGenerateMicroItinerary = useCallback(async () => {
+    setLoadingMicroItinerary(true);
+
+    try {
+      const promptInsight = parseExplorePrompt(microItineraryPrompt);
+      const timeOfDay = promptInsight.timeOfDay ?? fallbackTimeOfDay;
+      const recommendationResult = await recommendationService.getPersonalizedRecommendationsForCurrentUser({
+        limitDestinations: 10,
+        limitEvents: 6,
+        timeOfDay,
+        respectTimeOfDayWindow: true,
+      });
+
+      const distanceByDestinationId = new Map<string, number>();
+      for (const row of nearbyTopRatedRows) {
+        const safeId = String(row.id ?? '').trim();
+        if (!safeId) continue;
+        const distanceKm = typeof row.distance_km === 'number' && Number.isFinite(row.distance_km)
+          ? row.distance_km
+          : null;
+        if (distanceKm === null) continue;
+        distanceByDestinationId.set(safeId, distanceKm);
+      }
+
+      const recommendationCandidates: ExploreMultiFactorCandidate[] = recommendationResult.combined.map((item) => ({
+        ...item,
+        recommendationScore: prioritizePersonalPreferences ? item.recommendationScore : 0,
+        recommendationReasons: prioritizePersonalPreferences ? item.recommendationReasons : [],
+        distanceKm: item.kind === 'destination' ? (distanceByDestinationId.get(String(item.id)) ?? null) : null,
+      }));
+
+      const nearbyCandidates: ExploreMultiFactorCandidate[] = nearbyTopRatedRows.map((row) => ({
+        id: String(row.id),
+        kind: 'destination',
+        title: row.name,
+        location: row.location ?? '',
+        imageUrl: row.image_url ?? FALLBACK_DESTINATION_IMAGE,
+        priceValue: parseMoneyToNumber(row.price),
+        rating: typeof row.rating === 'number' ? row.rating : null,
+        category: toCategoryName(row as DestinationDiscoveryRow),
+        startTime: null,
+        recommendationScore: typeof row.rating === 'number' ? row.rating * 1.8 : 4,
+        recommendationReasons: ['Gần vị trí hiện tại của bạn', 'Được đánh giá tốt'],
+        distanceKm: typeof row.distance_km === 'number' && Number.isFinite(row.distance_km) ? row.distance_km : null,
+      }));
+
+      const mergedCandidateMap = new Map<string, ExploreMultiFactorCandidate>();
+      for (const candidate of [...recommendationCandidates, ...nearbyCandidates]) {
+        const key = `${candidate.kind}:${candidate.id}`;
+        if (!mergedCandidateMap.has(key)) {
+          mergedCandidateMap.set(key, candidate);
+        }
+      }
+
+      const mergedCandidates = Array.from(mergedCandidateMap.values());
+      const itineraryResult = buildMicroItinerary({
+        candidates: mergedCandidates,
+        budget: multiFactorBudget,
+        mood: multiFactorMood,
+        distancePref: multiFactorDistance,
+        availableTime: multiFactorAvailableTime,
+        prompt: microItineraryPrompt,
+        fallbackTimeOfDay: timeOfDay,
+      });
+
+      setMicroItineraryCandidates(itineraryResult.ranked.slice(0, 8));
+      setMicroItineraryStops(itineraryResult.itinerary);
+      setMicroItinerarySummary({
+        totalHours: itineraryResult.totalHours,
+        timeOfDay: itineraryResult.timeOfDay,
+      });
+
+      if (itineraryResult.itinerary.length === 0) {
+        addNotification({
+          message: 'Chưa tìm được lịch trình phù hợp. Hãy nới ngân sách hoặc khoảng cách rồi thử lại.',
+          type: 'warning',
+          durationMs: 3200,
+        });
+      }
+    } catch (error: any) {
+      console.warn('onGenerateMicroItinerary failed:', error?.message ?? error);
+      addNotification({
+        message: 'Không thể tạo gợi ý lịch trình lúc này.',
+        type: 'error',
+        durationMs: 3200,
+      });
+    } finally {
+      setLoadingMicroItinerary(false);
+    }
+  }, [
+    addNotification,
+    fallbackTimeOfDay,
+    microItineraryPrompt,
+    multiFactorAvailableTime,
+    multiFactorBudget,
+    multiFactorDistance,
+    multiFactorMood,
+    nearbyTopRatedRows,
+    prioritizePersonalPreferences,
+    toCategoryName,
+  ]);
 
   const isGpsPermissionDenied = useMemo(() => {
     const message = String(gpsErrorMsg ?? '').trim().toLowerCase();
@@ -308,7 +430,8 @@ export default function ExploreScreen() {
   );
 
   const selectedCategoryName = selectedCategory === 'all' ? null : selectedCategory;
-  const showDefaultExploreSections = selectedCategory === 'all';
+  const showDefaultExploreSections = true;
+  const showEventSections = selectedCategory === 'all';
 
   const selectedCategoryId = useMemo(() => {
     if (!selectedCategoryName) return null;
@@ -993,86 +1116,6 @@ export default function ExploreScreen() {
     });
   }, [addNotification, clearManualLocation, t]);
 
-  const onCreateEvent = useCallback(
-    async (form: EventFormData) => {
-      const start = combineLocalDateTime(form.startDate, form.startTime);
-      const end = combineLocalDateTime(form.endDate, form.endTime);
-
-      if (!start || !end) {
-        Alert.alert(t('events.form.error.invalidDateTimeTitle'), t('events.form.error.invalidDateTimeMessage'));
-        throw new Error('Invalid datetime format');
-      }
-
-      if (end <= start) {
-        Alert.alert(t('events.form.error.invalidDateTimeTitle'), 'Ngày kết thúc phải sau ngày bắt đầu');
-        throw new Error('end_time must be greater than start_time');
-      }
-
-      const price = Number(form.price || '0');
-      if (Number.isNaN(price) || price < 0) {
-        Alert.alert(t('events.form.error.invalidPriceTitle'), t('events.form.error.invalidPriceMessage'));
-        throw new Error('Invalid price');
-      }
-
-      try {
-        let uploadedImageUrl: string | null = null;
-        if (form.imageUri.trim()) {
-          const uploaded = await storageService.uploadEventImage({
-            uri: form.imageUri.trim(),
-            fileName: form.imageFileName || undefined,
-            contentType: form.imageMimeType || undefined,
-          });
-          uploadedImageUrl = uploaded.publicUrl;
-        }
-
-        await eventService.createEventForCurrentUser({
-          title: form.title,
-          category: form.category,
-          location: form.location,
-          start_time: start,
-          end_time: end,
-          price,
-          image_url: uploadedImageUrl,
-          description: form.description.trim() ? form.description.trim() : null,
-        });
-
-        setShowCreateModal(false);
-        addNotification({
-          message: t('events.form.createdSuccess'),
-          type: 'success',
-        });
-        hasLoadedInitialRef.current = false;
-        setAttractions([]);
-        setEvents([]);
-        setDistanceByKey({});
-        setPage(0);
-        setHasMore(true);
-        setEventOffset(0);
-        await loadDiscovery({
-          showSpinner: false,
-          append: false,
-          page: 0,
-          eventOffset: 0,
-        });
-      } catch (err: any) {
-        const message = String(err?.message ?? t('events.form.error.createFailedMessage'));
-        const lower = message.toLowerCase();
-
-        if (lower.includes('not authenticated')) {
-          Alert.alert(t('common.loginRequiredTitle'), t('explore.auth.createEventLoginRequired'), [
-            { text: t('common.cancel'), style: 'cancel' },
-            { text: t('common.login'), onPress: () => router.push('/login' as any) },
-          ]);
-          throw err;
-        }
-
-        Alert.alert(t('events.form.error.createFailedTitle'), message);
-        throw err;
-      }
-    },
-    [addNotification, loadDiscovery, t]
-  );
-
   const onOpenDestination = useCallback((row: DestinationDiscoveryRow) => {
     router.push({
       pathname: '/destination/[id]' as any,
@@ -1137,15 +1180,15 @@ export default function ExploreScreen() {
                 style={[
                   styles.personalizedReasonBadge,
                   {
-                    borderColor: isDark ? 'rgba(34,211,238,0.34)' : 'rgba(8,145,178,0.32)',
-                    backgroundColor: isDark ? 'rgba(34,211,238,0.16)' : 'rgba(34,211,238,0.12)',
+                    borderColor: isDark ? 'rgba(0,119,182,0.40)' : 'rgba(0,119,182,0.32)',
+                    backgroundColor: isDark ? 'rgba(0,119,182,0.20)' : 'rgba(0,119,182,0.10)',
                   },
                 ]}
               >
                 <Text
                   style={[
                     styles.personalizedReasonText,
-                    { color: isDark ? '#67e8f9' : '#0e7490' },
+                    { color: isDark ? '#90E0EF' : '#0077B6' },
                   ]}
                   numberOfLines={2}
                 >
@@ -1192,6 +1235,22 @@ export default function ExploreScreen() {
     router.push(`/event/${row.id}` as any);
   }, []);
 
+  const onOpenMultiFactorTarget = useCallback((item: { id: string; kind: 'destination' | 'event' }) => {
+    if (item.kind === 'event') {
+      router.push(`/event/${item.id}` as any);
+      return;
+    }
+
+    router.push(`/destination/${item.id}` as any);
+  }, []);
+
+  const getTimeOfDayLabel = useCallback((value: TimeOfDay) => {
+    if (value === 'morning') return 'buổi sáng';
+    if (value === 'afternoon') return 'buổi chiều';
+    if (value === 'evening') return 'buổi tối';
+    return 'ban đêm';
+  }, []);
+
   const isFiltered =
     !!submittedSearchQuery ||
     aiSmartSearchEnabled ||
@@ -1223,6 +1282,9 @@ export default function ExploreScreen() {
     return '';
   }, [isAiSearchActive, isLoading, smartSearchLocalizationSource, smartSearchT]);
 
+  const isLoadingMore = loadingMore;
+  const discoveryDataLength = attractions.length + events.length;
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
       <FlatList
@@ -1236,10 +1298,66 @@ export default function ExploreScreen() {
         onEndReached={onEndReachedDiscovery}
         onScroll={onDiscoveryListScroll}
         ListFooterComponent={
-          loadingMore ? (
-            <View style={styles.listFooterLoading}>
-              <ActivityIndicator color={ExploreEaseColors.primary} />
+          isLoadingMore ? (
+            <View style={styles.infiniteFooterContainer}>
+              <ActivityIndicator
+                size="large"
+                color={ExploreEaseColors.primary}
+              />
             </View>
+          ) : !hasMore && discoveryDataLength > 0 ? (
+            <ImageBackground
+              source={require('../../assets/images/background-vlu.png')}
+              style={{
+                width: '100%',
+                borderRadius: 14,
+                overflow: 'hidden',
+              }}
+              imageStyle={{ borderRadius: 14 }}
+            >
+              <View
+                style={{
+                  paddingTop: 14,
+                  paddingBottom: 40,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: isDark ? 'rgba(2, 23, 43, 0.56)' : 'rgba(255, 255, 255, 0.68)',
+                }}
+              >
+                <Text
+                  style={{
+                    textAlign: 'center',
+                    fontSize: 12,
+                    fontWeight: '700',
+                    marginBottom: 4,
+                    color: isDark ? '#dbeafe' : '#1e3a5f',
+                  }}
+                >
+                  Dự án: ExploreEase
+                </Text>
+                <Text
+                  style={{
+                    textAlign: 'center',
+                    fontSize: 12,
+                    fontWeight: '700',
+                    marginBottom: 8,
+                    color: '#0077B6',
+                  }}
+                >
+                  Thực hiện bởi: Hoàng Nguyên
+                </Text>
+                <View
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: 8,
+                    backgroundColor: '#e5e5e5',
+                  }}
+                >
+                  {/* // 🎯 TODO: [PASTE VLU LOGO HERE] */}
+                </View>
+              </View>
+            </ImageBackground>
           ) : null
         }
         renderItem={() => (
@@ -1249,18 +1367,6 @@ export default function ExploreScreen() {
             <Text style={[styles.headerTitle, { color: colors.title }]}>{t('explore.title')}</Text>
             <Text style={[styles.headerSubtitle, { color: colors.muted }]}>{t('explore.subtitle')}</Text>
           </View>
-
-          <Pressable
-            onPress={() => {
-              releaseOverlayTriggerFocus();
-              setShowCreateModal(true);
-            }}
-            style={({ pressed }) => [styles.createBtn, pressed ? { opacity: 0.84 } : null]}
-            accessibilityRole="button"
-          >
-            <Feather name="plus" size={16} color="#001018" />
-            <Text style={styles.createBtnText}>{t('explore.createEvent')}</Text>
-          </Pressable>
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
@@ -1312,49 +1418,75 @@ export default function ExploreScreen() {
               </Pressable>
             </View>
           </View>
-          <View style={[styles.searchWrap, { backgroundColor: colors.inputBg, borderColor: colors.border }]}> 
-            <Feather name="search" size={16} color={colors.muted} />
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              onSubmitEditing={executeSmartSearch}
-              placeholder={smartSearchT('searchPlaceholder')}
-              placeholderTextColor={colors.muted}
-              style={[styles.searchInput, { color: colors.text }]}
-              autoCorrect={false}
-              autoCapitalize="none"
-              returnKeyType="search"
-              editable={!isLoading}
-            />
-            {!!searchQuery ? (
-              <Pressable
-                onPress={() => {
-                  setSearchQuery('');
-                  setSubmittedSearchQuery('');
-                  setSmartSearchLocalizationSource('default');
-                  setSearchNonce((prev) => prev + 1);
-                  setSuggestions([]);
-                  setShowSuggestions(false);
-                }}
+          <View style={styles.searchRow}>
+            <View style={[styles.searchWrap, styles.searchWrapExpanded, { backgroundColor: colors.inputBg, borderColor: colors.border }]}> 
+              <Feather name="search" size={16} color={colors.muted} />
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                onSubmitEditing={executeSmartSearch}
+                placeholder={smartSearchT('searchPlaceholder')}
+                placeholderTextColor={colors.muted}
+                style={[styles.searchInput, { color: colors.text }]}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+                editable={!isLoading}
+              />
+              {!!searchQuery ? (
+                <Pressable
+                  onPress={() => {
+                    setSearchQuery('');
+                    setSubmittedSearchQuery('');
+                    setSmartSearchLocalizationSource('default');
+                    setSearchNonce((prev) => prev + 1);
+                    setSuggestions([]);
+                    setShowSuggestions(false);
+                  }}
+                  disabled={isLoading}
+                  accessibilityRole="button"
+                >
+                  <Feather name="x" size={16} color={colors.muted} />
+                </Pressable>
+              ) : null}
+              <TouchableOpacity
+                onPress={() => executeSmartSearch()}
                 disabled={isLoading}
+                activeOpacity={0.84}
+                style={[
+                  styles.searchSubmitBtn,
+                  isLoading ? { opacity: 0.6 } : null,
+                ]}
                 accessibilityRole="button"
+                accessibilityLabel={smartSearchT('submit')}
               >
-                <Feather name="x" size={16} color={colors.muted} />
-              </Pressable>
-            ) : null}
-            <TouchableOpacity
-              onPress={() => executeSmartSearch()}
-              disabled={isLoading}
-              activeOpacity={0.84}
-              style={[
-                styles.searchSubmitBtn,
-                isLoading ? { opacity: 0.6 } : null,
+                <Feather name="arrow-right" size={16} color="#001018" />
+              </TouchableOpacity>
+            </View>
+
+            <Pressable
+              onPress={() => {
+                releaseOverlayTriggerFocus();
+                setShowFilterModal(true);
+              }}
+              style={({ pressed }) => [
+                styles.filterBtn,
+                {
+                  borderColor: isFiltered ? ExploreEaseColors.primary : colors.border,
+                  backgroundColor: isFiltered ? 'rgba(0,119,182,0.14)' : colors.inputBg,
+                },
+                pressed ? { opacity: 0.84 } : null,
               ]}
               accessibilityRole="button"
-              accessibilityLabel={smartSearchT('submit')}
+              accessibilityLabel="Mở bộ lọc nâng cao"
             >
-              <Feather name="arrow-right" size={16} color="#001018" />
-            </TouchableOpacity>
+              <Feather name="sliders" size={18} color={ExploreEaseColors.primary} />
+              {isFiltered ? (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>!</Text>
+                </View>
+              ) : null}
+            </Pressable>
           </View>
 
           <View style={styles.aiToggleRow}>
@@ -1420,15 +1552,234 @@ export default function ExploreScreen() {
             </View>
           ) : null}
 
-          <View style={{ marginTop: 4 }}>
-            <View style={styles.chipRow}>
+          <View style={styles.categoryHeaderRow}>
+            <Text style={[styles.label, { color: colors.title }]}>Khám phá nhanh</Text>
+            {isFiltered ? (
+              <Pressable onPress={onResetFilters} accessibilityRole="button">
+                <Text style={[styles.resetText, { color: ExploreEaseColors.primary }]}>{t('common.reset')}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            directionalLockEnabled
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.chipRowHorizontal}
+          >
+            {EXPLORE_CATEGORY_CHIPS.map((item) => (
               <FilterChip
-                selected={nearbyOnly}
-                label={t('explore.filter.nearbyChip')}
-                onPress={() => setNearbyOnly((prev) => !prev)}
+                key={item.value}
+                selected={selectedCategory === item.value}
+                label={item.label}
+                onPress={() => onSelectCategory(item.value)}
+              />
+            ))}
+          </ScrollView>
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.personalizedHeaderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.label, { color: colors.title }]}>Tìm kiếm đa yếu tố</Text>
+              <Text style={[styles.multiFactorHint, { color: colors.muted }]}>
+                Lọc theo ngân sách, mood, thời gian rảnh, khoảng cách và ưu tiên cá nhân. Bạn cũng có thể nhập kiểu:
+                {' '}“Gợi ý lịch trình 4 giờ buổi tối”.
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.multiFactorBadge,
+                {
+                  borderColor: isDark ? 'rgba(0,119,182,0.36)' : 'rgba(0,119,182,0.18)',
+                  backgroundColor: isDark ? 'rgba(0,119,182,0.18)' : 'rgba(0,119,182,0.08)',
+                },
+              ]}
+            >
+              <Text style={styles.multiFactorBadgeText}>AI</Text>
+            </View>
+          </View>
+
+          <View style={[styles.searchWrap, { backgroundColor: colors.inputBg, borderColor: colors.border }]}>
+            <Feather name="edit-3" size={16} color={colors.muted} />
+            <TextInput
+              value={microItineraryPrompt}
+              onChangeText={setMicroItineraryPrompt}
+              placeholder="Ví dụ: Gợi ý lịch trình 4 giờ buổi tối"
+              placeholderTextColor={colors.muted}
+              style={[styles.searchInput, { color: colors.text }]}
+              autoCorrect={false}
+              returnKeyType="search"
+              onSubmitEditing={() => void onGenerateMicroItinerary()}
+            />
+          </View>
+
+          <FilterSection label="Ngân sách" color={colors.title} horizontal>
+            <FilterChip selected={multiFactorBudget === 'any'} label="Không giới hạn" onPress={() => setMultiFactorBudget('any')} />
+            <FilterChip selected={multiFactorBudget === 'free'} label="Miễn phí" onPress={() => setMultiFactorBudget('free')} />
+            <FilterChip selected={multiFactorBudget === 'budget'} label="Tiết kiệm" onPress={() => setMultiFactorBudget('budget')} />
+            <FilterChip selected={multiFactorBudget === 'mid'} label="Trung bình" onPress={() => setMultiFactorBudget('mid')} />
+            <FilterChip selected={multiFactorBudget === 'premium'} label="Cao cấp" onPress={() => setMultiFactorBudget('premium')} />
+          </FilterSection>
+
+          <FilterSection label="Mood" color={colors.title} horizontal>
+            <FilterChip selected={multiFactorMood === 'any'} label="Bất kỳ" onPress={() => setMultiFactorMood('any')} />
+            <FilterChip selected={multiFactorMood === 'chill'} label="Chill" onPress={() => setMultiFactorMood('chill')} />
+            <FilterChip selected={multiFactorMood === 'food'} label="Ẩm thực" onPress={() => setMultiFactorMood('food')} />
+            <FilterChip selected={multiFactorMood === 'culture'} label="Văn hóa" onPress={() => setMultiFactorMood('culture')} />
+            <FilterChip selected={multiFactorMood === 'adventure'} label="Phiêu lưu" onPress={() => setMultiFactorMood('adventure')} />
+            <FilterChip selected={multiFactorMood === 'romantic'} label="Lãng mạn" onPress={() => setMultiFactorMood('romantic')} />
+          </FilterSection>
+
+          <FilterSection label="Thời gian rảnh" color={colors.title} horizontal>
+            <FilterChip selected={multiFactorAvailableTime === 'any'} label="Linh hoạt" onPress={() => setMultiFactorAvailableTime('any')} />
+            <FilterChip selected={multiFactorAvailableTime === '2h'} label="2 giờ" onPress={() => setMultiFactorAvailableTime('2h')} />
+            <FilterChip selected={multiFactorAvailableTime === '4h'} label="4 giờ" onPress={() => setMultiFactorAvailableTime('4h')} />
+            <FilterChip selected={multiFactorAvailableTime === '6h'} label="6 giờ" onPress={() => setMultiFactorAvailableTime('6h')} />
+            <FilterChip selected={multiFactorAvailableTime === 'full-day'} label="Cả ngày" onPress={() => setMultiFactorAvailableTime('full-day')} />
+          </FilterSection>
+
+          <FilterSection label="Khoảng cách" color={colors.title} horizontal>
+            <FilterChip selected={multiFactorDistance === 'any'} label="Bất kỳ" onPress={() => setMultiFactorDistance('any')} />
+            <FilterChip selected={multiFactorDistance === 'near'} label="Gần tôi" onPress={() => setMultiFactorDistance('near')} />
+            <FilterChip selected={multiFactorDistance === 'city'} label="Trong thành phố" onPress={() => setMultiFactorDistance('city')} />
+            <FilterChip selected={multiFactorDistance === 'roadtrip'} label="Đi xa" onPress={() => setMultiFactorDistance('roadtrip')} />
+          </FilterSection>
+
+          <View style={styles.preferenceRow}>
+            <Text style={[styles.preferenceLabel, { color: colors.title }]}>Ưu tiên cá nhân</Text>
+            <View style={styles.preferenceToggleRow}>
+              <FilterChip
+                selected={prioritizePersonalPreferences}
+                label="Bật"
+                onPress={() => setPrioritizePersonalPreferences(true)}
+              />
+              <FilterChip
+                selected={!prioritizePersonalPreferences}
+                label="Tắt"
+                onPress={() => setPrioritizePersonalPreferences(false)}
               />
             </View>
           </View>
+
+          <Text style={[styles.multiFactorHint, { color: colors.muted }]}>
+            Khi bật, hệ thống ưu tiên sở thích và lịch sử gợi ý của riêng bạn trước khi xếp lịch trình.
+          </Text>
+
+          <Pressable
+            onPress={() => void onGenerateMicroItinerary()}
+            style={({ pressed }) => [
+              styles.multiFactorPrimaryBtn,
+              loadingMicroItinerary ? { opacity: 0.72 } : null,
+              pressed ? { opacity: 0.84 } : null,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Tạo gợi ý lịch trình"
+          >
+            {loadingMicroItinerary ? (
+              <ActivityIndicator color="#001018" size="small" />
+            ) : (
+              <>
+                <Feather name="zap" size={16} color="#001018" />
+                <Text style={styles.multiFactorPrimaryBtnText}>Tạo gợi ý lịch trình</Text>
+              </>
+            )}
+          </Pressable>
+
+          {microItinerarySummary ? (
+            <View
+              style={[
+                styles.multiFactorSummaryCard,
+                {
+                  borderColor: isDark ? 'rgba(0,119,182,0.38)' : 'rgba(0,119,182,0.18)',
+                  backgroundColor: isDark ? 'rgba(0,119,182,0.14)' : 'rgba(0,119,182,0.08)',
+                },
+              ]}
+            >
+              <Text style={[styles.multiFactorSummaryTitle, { color: colors.title }]}>
+                Lịch trình gợi ý {microItinerarySummary.totalHours} giờ {getTimeOfDayLabel(microItinerarySummary.timeOfDay)}
+              </Text>
+              <Text style={[styles.multiFactorHint, { color: colors.muted }]}>
+                Ưu tiên dừng ở các điểm phù hợp với mood, quỹ thời gian và mức di chuyển bạn đã chọn.
+              </Text>
+            </View>
+          ) : null}
+
+          {microItineraryStops.length > 0 ? (
+            <View style={styles.multiFactorStopsWrap}>
+              {microItineraryStops.map((item) => (
+                <Pressable
+                  key={`stop:${item.kind}:${item.id}:${item.timeLabel}`}
+                  onPress={() => onOpenMultiFactorTarget(item)}
+                  style={({ pressed }) => [
+                    styles.multiFactorStopCard,
+                    { borderColor: colors.border, backgroundColor: colors.inputBg },
+                    pressed ? { opacity: 0.84 } : null,
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <View style={styles.multiFactorStopHeader}>
+                    <Text style={styles.multiFactorStopTime}>{item.timeLabel}</Text>
+                    <Text style={[styles.multiFactorStopKind, { color: ExploreEaseColors.primary }]}>
+                      {item.kind === 'event' ? 'Sự kiện' : 'Địa điểm'}
+                    </Text>
+                  </View>
+                  <Text style={[styles.multiFactorStopTitle, { color: colors.title }]} numberOfLines={2}>
+                    {item.title}
+                  </Text>
+                  <Text style={[styles.multiFactorStopMeta, { color: colors.muted }]} numberOfLines={1}>
+                    {item.location || 'Đang cập nhật địa điểm'}
+                  </Text>
+                  <Text style={[styles.multiFactorStopMeta, { color: colors.muted }]}>
+                    {item.note}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          {microItineraryCandidates.length > 0 ? (
+            <View style={styles.multiFactorCandidatesWrap}>
+              <Text style={[styles.preferenceLabel, { color: colors.title }]}>Điểm phù hợp nhất lúc này</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                directionalLockEnabled
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.chipRowHorizontal}
+              >
+                {microItineraryCandidates.map((item) => (
+                  <Pressable
+                    key={`candidate:${item.kind}:${item.id}`}
+                    onPress={() => onOpenMultiFactorTarget(item)}
+                    style={({ pressed }) => [
+                      styles.multiFactorCandidateCard,
+                      { borderColor: colors.border, backgroundColor: colors.inputBg },
+                      pressed ? { opacity: 0.84 } : null,
+                    ]}
+                    accessibilityRole="button"
+                  >
+                    <Text style={[styles.multiFactorCandidateTag, { color: ExploreEaseColors.primary }]}>
+                      {item.kind === 'event' ? 'Sự kiện' : 'Địa điểm'}
+                    </Text>
+                    <Text style={[styles.multiFactorCandidateTitle, { color: colors.title }]} numberOfLines={2}>
+                      {item.title}
+                    </Text>
+                    <Text style={[styles.multiFactorStopMeta, { color: colors.muted }]} numberOfLines={1}>
+                      {item.location || 'Đang cập nhật địa điểm'}
+                    </Text>
+                    <Text style={[styles.multiFactorStopMeta, { color: colors.muted }]} numberOfLines={1}>
+                      {item.recommendationReasons?.[0] || 'Phù hợp với bộ lọc hiện tại'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
         </View>
 
         {showDefaultExploreSections ? (
@@ -1671,85 +2022,6 @@ export default function ExploreScreen() {
           ) : null}
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-          <View style={styles.filterHeaderRow}>
-            <Text style={[styles.label, { color: colors.title }]}>{t('explore.filter.title')}</Text>
-            {isFiltered ? (
-              <Pressable onPress={onResetFilters} accessibilityRole="button">
-                <Text style={[styles.resetText, { color: ExploreEaseColors.primary }]}>{t('common.reset')}</Text>
-              </Pressable>
-            ) : null}
-          </View>
-
-          <FilterSection label={t('explore.filter.category')} color={colors.title} horizontal>
-            {EXPLORE_CATEGORY_CHIPS.map((item) => (
-              <FilterChip
-                key={item.value}
-                selected={selectedCategory === item.value}
-                label={item.label}
-                onPress={() => onSelectCategory(item.value)}
-              />
-            ))}
-          </FilterSection>
-
-          <FilterSection label={t('explore.filter.rating')} color={colors.title}>
-            <FilterChip selected={ratingFilter === null} label={t('common.all')} onPress={() => setRatingFilter(null)} />
-            <FilterChip selected={ratingFilter === 4} label="4.0+" onPress={() => setRatingFilter(4)} />
-            <FilterChip selected={ratingFilter === 4.5} label="4.5+" onPress={() => setRatingFilter(4.5)} />
-          </FilterSection>
-
-          <FilterSection label={t('explore.filter.price')} color={colors.title}>
-            <FilterChip selected={priceFilter === 'all'} label={t('common.all')} onPress={() => setPriceFilter('all')} />
-            <FilterChip selected={priceFilter === 'free'} label={t('common.free')} onPress={() => setPriceFilter('free')} />
-            <FilterChip selected={priceFilter === 'paid'} label={t('common.paid')} onPress={() => setPriceFilter('paid')} />
-          </FilterSection>
-
-          {showDefaultExploreSections ? (
-            <>
-              <FilterSection label={t('explore.filter.eventDate')} color={colors.title}>
-                <FilterChip selected={eventDateFilter === 'all'} label={t('common.all')} onPress={() => setEventDateFilter('all')} />
-                <FilterChip selected={eventDateFilter === 'today'} label={t('explore.filter.today')} onPress={() => setEventDateFilter('today')} />
-                <FilterChip
-                  selected={eventDateFilter === 'next-7-days'}
-                  label={t('explore.filter.next7Days')}
-                  onPress={() => setEventDateFilter('next-7-days')}
-                />
-                <FilterChip
-                  selected={eventDateFilter === 'this-month'}
-                  label={t('explore.filter.thisMonth')}
-                  onPress={() => setEventDateFilter('this-month')}
-                />
-              </FilterSection>
-
-              <FilterSection label={t('explore.filter.eventStatus')} color={colors.title}>
-                <FilterChip selected={eventStatusFilter === 'all'} label={t('common.all')} onPress={() => setEventStatusFilter('all')} />
-                <FilterChip
-                  selected={eventStatusFilter === 'incoming'}
-                  label={t('event.status.incoming')}
-                  onPress={() => setEventStatusFilter('incoming')}
-                />
-                <FilterChip
-                  selected={eventStatusFilter === 'ongoing'}
-                  label={t('event.status.ongoing')}
-                  onPress={() => setEventStatusFilter('ongoing')}
-                />
-                <FilterChip
-                  selected={eventStatusFilter === 'completed'}
-                  label={t('event.status.completed')}
-                  onPress={() => setEventStatusFilter('completed')}
-                />
-              </FilterSection>
-            </>
-          ) : null}
-
-          <FilterSection label={t('explore.filter.sort')} color={colors.title}>
-            <FilterChip selected={sortBy === 'relevance'} label={t('explore.sort.relevance')} onPress={() => setSortBy('relevance')} />
-            <FilterChip selected={sortBy === 'top-rated'} label={t('explore.sort.topRated')} onPress={() => setSortBy('top-rated')} />
-            <FilterChip selected={sortBy === 'a-z'} label={t('explore.sort.alphabetical')} onPress={() => setSortBy('a-z')} />
-          </FilterSection>
-
-        </View>
-
         {loading ? (
           <View style={styles.stateWrap}>
             <ActivityIndicator color={ExploreEaseColors.primary} />
@@ -1835,19 +2107,10 @@ export default function ExploreScreen() {
               })
             )}
 
-            {showDefaultExploreSections ? (
+            {showEventSections ? (
               <>
                 <View style={styles.sectionHead}>
                   <Text style={[styles.sectionTitle, { color: colors.title }]}>{t('explore.events', { count: events.length })}</Text>
-                  <Pressable
-                    onPress={() => {
-                      releaseOverlayTriggerFocus();
-                      setShowCreateModal(true);
-                    }}
-                    accessibilityRole="button"
-                  >
-                    <Text style={{ color: ExploreEaseColors.primary, fontWeight: '800', fontSize: 12 }}>{t('explore.createEvent')}</Text>
-                  </Pressable>
                 </View>
 
                 {events.length === 0 ? (
@@ -1946,19 +2209,126 @@ export default function ExploreScreen() {
         )}
       />
 
-            <Modal
-              visible={showCreateModal}
-              animationType="slide"
-              transparent={false}
-              onRequestClose={() => setShowCreateModal(false)}
-            >
-              <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}> 
-                <CreateEventForm
-                  onCancel={() => setShowCreateModal(false)}
-                  onSubmit={onCreateEvent}
-                />
-              </SafeAreaView>
-            </Modal>
+      <Modal
+        visible={showFilterModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.filterSheetOverlay}>
+          <Pressable
+            onPress={() => setShowFilterModal(false)}
+            style={styles.filterSheetBackdrop}
+          />
+
+          <SafeAreaView style={styles.filterSheetSafeArea}>
+            <View style={[styles.filterSheetCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.filterSheetHandle} />
+
+              <View style={styles.filterSheetHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.filterSheetTitle, { color: colors.title }]}>{t('explore.filter.title')}</Text>
+                  <Text style={[styles.filterSheetSubtitle, { color: colors.muted }]}>
+                    Ẩn bộ lọc nâng cao để màn khám phá gọn hơn nhưng vẫn giữ nguyên toàn bộ chức năng lọc.
+                  </Text>
+                </View>
+                {isFiltered ? (
+                  <Pressable onPress={onResetFilters} accessibilityRole="button">
+                    <Text style={[styles.resetText, { color: ExploreEaseColors.primary }]}>{t('common.reset')}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+
+              <ScrollView
+                style={styles.filterSheetScroll}
+                contentContainerStyle={styles.filterSheetScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                <FilterSection label={t('explore.filter.rating')} color={colors.title}>
+                  <FilterChip selected={ratingFilter === null} label={t('common.all')} onPress={() => setRatingFilter(null)} />
+                  <FilterChip selected={ratingFilter === 4} label="4.0+" onPress={() => setRatingFilter(4)} />
+                  <FilterChip selected={ratingFilter === 4.5} label="4.5+" onPress={() => setRatingFilter(4.5)} />
+                </FilterSection>
+
+                <FilterSection label={t('explore.filter.price')} color={colors.title}>
+                  <FilterChip selected={priceFilter === 'all'} label={t('common.all')} onPress={() => setPriceFilter('all')} />
+                  <FilterChip selected={priceFilter === 'free'} label={t('common.free')} onPress={() => setPriceFilter('free')} />
+                  <FilterChip selected={priceFilter === 'paid'} label={t('common.paid')} onPress={() => setPriceFilter('paid')} />
+                </FilterSection>
+
+                {showEventSections ? (
+                  <>
+                    <FilterSection label={t('explore.filter.eventDate')} color={colors.title}>
+                      <FilterChip selected={eventDateFilter === 'all'} label={t('common.all')} onPress={() => setEventDateFilter('all')} />
+                      <FilterChip selected={eventDateFilter === 'today'} label={t('explore.filter.today')} onPress={() => setEventDateFilter('today')} />
+                      <FilterChip
+                        selected={eventDateFilter === 'next-7-days'}
+                        label={t('explore.filter.next7Days')}
+                        onPress={() => setEventDateFilter('next-7-days')}
+                      />
+                      <FilterChip
+                        selected={eventDateFilter === 'this-month'}
+                        label={t('explore.filter.thisMonth')}
+                        onPress={() => setEventDateFilter('this-month')}
+                      />
+                    </FilterSection>
+
+                    <FilterSection label={t('explore.filter.eventStatus')} color={colors.title}>
+                      <FilterChip selected={eventStatusFilter === 'all'} label={t('common.all')} onPress={() => setEventStatusFilter('all')} />
+                      <FilterChip
+                        selected={eventStatusFilter === 'incoming'}
+                        label={t('event.status.incoming')}
+                        onPress={() => setEventStatusFilter('incoming')}
+                      />
+                      <FilterChip
+                        selected={eventStatusFilter === 'ongoing'}
+                        label={t('event.status.ongoing')}
+                        onPress={() => setEventStatusFilter('ongoing')}
+                      />
+                      <FilterChip
+                        selected={eventStatusFilter === 'completed'}
+                        label={t('event.status.completed')}
+                        onPress={() => setEventStatusFilter('completed')}
+                      />
+                    </FilterSection>
+                  </>
+                ) : null}
+
+                <FilterSection label={t('explore.filter.sort')} color={colors.title}>
+                  <FilterChip selected={sortBy === 'relevance'} label={t('explore.sort.relevance')} onPress={() => setSortBy('relevance')} />
+                  <FilterChip selected={sortBy === 'top-rated'} label={t('explore.sort.topRated')} onPress={() => setSortBy('top-rated')} />
+                  <FilterChip selected={sortBy === 'a-z'} label={t('explore.sort.alphabetical')} onPress={() => setSortBy('a-z')} />
+                </FilterSection>
+              </ScrollView>
+
+              <View style={styles.filterSheetActions}>
+                <Pressable
+                  onPress={() => setShowFilterModal(false)}
+                  style={({ pressed }) => [
+                    styles.filterSheetSecondaryBtn,
+                    { borderColor: colors.border, backgroundColor: colors.inputBg },
+                    pressed ? { opacity: 0.84 } : null,
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.filterSheetSecondaryBtnText, { color: colors.text }]}>Đóng</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setShowFilterModal(false)}
+                  style={({ pressed }) => [
+                    styles.filterSheetPrimaryBtn,
+                    pressed ? { opacity: 0.84 } : null,
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.filterSheetPrimaryBtnText}>Áp dụng</Text>
+                </Pressable>
+              </View>
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
           </SafeAreaView>
         );
       }
@@ -2101,6 +2471,14 @@ export default function ExploreScreen() {
           alignItems: 'center',
           gap: 8,
         },
+        searchRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+        },
+        searchWrapExpanded: {
+          flex: 1,
+        },
         searchInput: {
           flex: 1,
           fontSize: 14,
@@ -2113,6 +2491,32 @@ export default function ExploreScreen() {
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: ExploreEaseColors.primary,
+        },
+        filterBtn: {
+          width: 44,
+          height: 44,
+          borderRadius: 12,
+          borderWidth: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        filterBadge: {
+          position: 'absolute',
+          top: 7,
+          right: 7,
+          minWidth: 14,
+          height: 14,
+          borderRadius: 7,
+          backgroundColor: ExploreEaseColors.primary,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 2,
+        },
+        filterBadgeText: {
+          color: '#001018',
+          fontSize: 9,
+          fontWeight: '900',
+          lineHeight: 11,
         },
         suggestionList: {
           borderWidth: 1,
@@ -2298,6 +2702,128 @@ export default function ExploreScreen() {
           fontSize: 13,
           fontWeight: '800',
         },
+        multiFactorHint: {
+          marginTop: 4,
+          fontSize: 12,
+          lineHeight: 18,
+          fontWeight: '600',
+        },
+        multiFactorBadge: {
+          minHeight: 34,
+          borderRadius: 999,
+          borderWidth: 1,
+          paddingHorizontal: 12,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        multiFactorBadgeText: {
+          color: ExploreEaseColors.primary,
+          fontSize: 11,
+          fontWeight: '900',
+        },
+        preferenceRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+          marginTop: 2,
+        },
+        preferenceLabel: {
+          fontSize: 12,
+          fontWeight: '800',
+        },
+        preferenceToggleRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+        },
+        multiFactorPrimaryBtn: {
+          minHeight: 46,
+          borderRadius: 14,
+          backgroundColor: ExploreEaseColors.primary,
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'row',
+          gap: 8,
+          paddingHorizontal: 14,
+        },
+        multiFactorPrimaryBtnText: {
+          color: '#001018',
+          fontSize: 13,
+          fontWeight: '900',
+        },
+        multiFactorSummaryCard: {
+          marginTop: 2,
+          borderRadius: 14,
+          borderWidth: 1,
+          paddingHorizontal: 12,
+          paddingVertical: 11,
+          gap: 4,
+        },
+        multiFactorSummaryTitle: {
+          fontSize: 14,
+          fontWeight: '900',
+        },
+        multiFactorStopsWrap: {
+          gap: 10,
+        },
+        multiFactorStopCard: {
+          borderWidth: 1,
+          borderRadius: 14,
+          paddingHorizontal: 12,
+          paddingVertical: 11,
+          gap: 4,
+        },
+        multiFactorStopHeader: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+        },
+        multiFactorStopTime: {
+          color: '#001018',
+          backgroundColor: ExploreEaseColors.primary,
+          overflow: 'hidden',
+          borderRadius: 999,
+          paddingHorizontal: 10,
+          paddingVertical: 4,
+          fontSize: 11,
+          fontWeight: '900',
+        },
+        multiFactorStopKind: {
+          fontSize: 11,
+          fontWeight: '800',
+        },
+        multiFactorStopTitle: {
+          fontSize: 14,
+          lineHeight: 19,
+          fontWeight: '900',
+        },
+        multiFactorStopMeta: {
+          fontSize: 12,
+          fontWeight: '600',
+          lineHeight: 17,
+        },
+        multiFactorCandidatesWrap: {
+          gap: 8,
+        },
+        multiFactorCandidateCard: {
+          width: 210,
+          borderWidth: 1,
+          borderRadius: 14,
+          paddingHorizontal: 12,
+          paddingVertical: 11,
+          gap: 4,
+        },
+        multiFactorCandidateTag: {
+          fontSize: 10,
+          fontWeight: '900',
+        },
+        multiFactorCandidateTitle: {
+          fontSize: 13,
+          lineHeight: 18,
+          fontWeight: '900',
+        },
         actionsRow: {
           flexDirection: 'row',
           gap: 8,
@@ -2336,9 +2862,100 @@ export default function ExploreScreen() {
           alignItems: 'center',
           justifyContent: 'space-between',
         },
+        categoryHeaderRow: {
+          marginTop: 2,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+        },
         resetText: {
           fontSize: 12,
           fontWeight: '800',
+        },
+        filterSheetOverlay: {
+          flex: 1,
+          justifyContent: 'flex-end',
+        },
+        filterSheetBackdrop: {
+          ...StyleSheet.absoluteFillObject,
+          backgroundColor: 'rgba(2, 6, 23, 0.46)',
+        },
+        filterSheetSafeArea: {
+          justifyContent: 'flex-end',
+        },
+        filterSheetCard: {
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+          borderWidth: 1,
+          borderBottomWidth: 0,
+          paddingHorizontal: 16,
+          paddingTop: 10,
+          paddingBottom: 18,
+          maxHeight: '86%',
+          gap: 14,
+        },
+        filterSheetHandle: {
+          alignSelf: 'center',
+          width: 56,
+          height: 5,
+          borderRadius: 999,
+          backgroundColor: 'rgba(148,163,184,0.45)',
+        },
+        filterSheetHeader: {
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 12,
+        },
+        filterSheetTitle: {
+          fontSize: 18,
+          fontWeight: '900',
+        },
+        filterSheetSubtitle: {
+          marginTop: 4,
+          fontSize: 12,
+          lineHeight: 18,
+          fontWeight: '600',
+        },
+        filterSheetScroll: {
+          maxHeight: 420,
+        },
+        filterSheetScrollContent: {
+          gap: 14,
+          paddingBottom: 4,
+        },
+        filterSheetActions: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+        },
+        filterSheetSecondaryBtn: {
+          flex: 1,
+          minHeight: 46,
+          borderRadius: 14,
+          borderWidth: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 12,
+        },
+        filterSheetSecondaryBtnText: {
+          fontSize: 13,
+          fontWeight: '800',
+        },
+        filterSheetPrimaryBtn: {
+          flex: 1,
+          minHeight: 46,
+          borderRadius: 14,
+          backgroundColor: ExploreEaseColors.primary,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 12,
+        },
+        filterSheetPrimaryBtnText: {
+          color: '#001018',
+          fontSize: 13,
+          fontWeight: '900',
         },
         chipRow: {
           flexDirection: 'row',
@@ -2380,11 +2997,29 @@ export default function ExploreScreen() {
           paddingVertical: 30,
           gap: 10,
         },
-        listFooterLoading: {
-          paddingVertical: 12,
+        infiniteFooterContainer: {
+          paddingVertical: 24,
+          justifyContent: 'center',
+          alignItems: 'center',
+        },
+        finalFooterContainer: {
+          paddingTop: 12,
+          paddingBottom: 40,
           alignItems: 'center',
           justifyContent: 'center',
           gap: 8,
+        },
+        finalFooterText: {
+          fontSize: 12,
+          fontWeight: '600',
+          textAlign: 'center',
+        },
+        finalFooterLogoPlaceholder: {
+          marginTop: 8,
+          height: 80,
+          width: 80,
+          backgroundColor: '#e5e5e5',
+          borderRadius: 8,
         },
         stateText: {
           fontSize: 13,

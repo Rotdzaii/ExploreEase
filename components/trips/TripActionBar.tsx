@@ -56,8 +56,8 @@ export function TripActionBar({ onOptimizeRoute, onShare, optimized }: TripActio
       >
         <Feather name="share-2" size={18} color={ExploreEaseColors.primary} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.btnTitle, { color: colors.text }]}>{t('trips.actions.shareTitle')}</Text>
-          <Text style={[styles.btnDesc, { color: colors.sub }]}>{t('trips.actions.shareSubtitle')}</Text>
+          <Text style={[styles.btnTitle, { color: colors.text }]}>Chia sẻ QR</Text>
+          <Text style={[styles.btnDesc, { color: colors.sub }]}>Mở mã QR và gửi nhanh cho bạn bè</Text>
         </View>
       </Pressable>
     </View>

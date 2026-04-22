@@ -282,7 +282,7 @@ const runDestinationQueryWithLocalizedFallback = async <TRow>(
   runQuery: (input: {
     selectColumns: string;
     supportsLocalizedColumns: boolean;
-  }) => Promise<{ data: TRow[] | null; error: any }>
+  }) => Promise<{ data: unknown[] | null; error: any }>
 ): Promise<{ rows: TRow[]; usedLocalizedColumns: boolean }> => {
   if (destinationLocalizedColumnsSupported === 'no') {
     const baseResult = await runQuery({

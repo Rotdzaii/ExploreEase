@@ -3,6 +3,7 @@ import ShareBottomSheet from '@/components/events/ShareBottomSheet';
 import { TimeOfDayToggle } from '@/components/home/TimeOfDayToggle';
 import { YouMightAlsoLike, type YouMightAlsoLikeItem } from '@/components/home/YouMightAlsoLike';
 import { RatingDistribution, ReviewCard, ReviewForm } from '@/components/reviews';
+import { QrShareModal } from '@/components/share/QrShareModal';
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useNetwork } from '@/hooks/useNetwork';
 import { useCurrency } from '@/src/context/currency';
@@ -12,12 +13,15 @@ import { eventBookmarkService } from '@/src/services/eventBookmarkService';
 import { calculateAverageRating as calculateEventAverageRating, eventReviewService, type EventReviewRow } from '@/src/services/eventReviewService';
 import { eventService, getEventStatusByTime, type EventRow, type EventStatus } from '@/src/services/eventService';
 import { itineraryService } from '@/src/services/itineraryService';
+import { syncBookmarkedEventReminderAsync } from '@/src/services/localNotificationService';
 import { recommendationService, resolveTimeOfDayPreference, type PersonalizedRecommendationsResult } from '@/src/services/recommendationService';
+import { socialService } from '@/src/services/socialService';
 import { storageService } from '@/src/services/storageService';
 import { supabase } from '@/src/services/supabase';
 import type { TripRow } from '@/src/services/tripService';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { useRecommendationPreferencesStore } from '@/src/store/useRecommendationPreferencesStore';
+import { buildEventPublicUrl } from '@/src/utils/eventShare';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import * as ImagePicker from 'expo-image-picker';
@@ -233,6 +237,7 @@ export default function EventDetailScreen() {
   const [creatingTripAndAdding, setCreatingTripAndAdding] = useState(false);
   const [isTripPickerModalOpen, setIsTripPickerModalOpen] = useState(false);
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
+  const [qrShareVisible, setQrShareVisible] = useState(false);
 
   const colors = useMemo(
     () => ({
@@ -423,7 +428,7 @@ export default function EventDetailScreen() {
       });
 
       addNotification({
-        message: t('event.trip.addedSuccess'),
+        message: `Đã thêm "${event.title}" vào kế hoạch`,
         type: 'success',
         durationMs: 3000,
       });
@@ -755,6 +760,21 @@ export default function EventDetailScreen() {
   useEffect(() => {
     void loadBookmarkState();
   }, [loadBookmarkState]);
+
+  useEffect(() => {
+    if (!event || !isBookmarked) return;
+
+    void syncBookmarkedEventReminderAsync({
+      bookmarked: true,
+      eventId: event.id,
+      eventTitle: event.title,
+      startTime: event.start_time,
+      location: event.location,
+      userId: currentUserId,
+    }).catch((error: any) => {
+      console.warn('event detail reminder sync failed:', error?.message ?? error);
+    });
+  }, [currentUserId, event, isBookmarked]);
 
   const fetchContextualRecommendations = useCallback(async () => {
     if (!eventId) {
@@ -1161,6 +1181,16 @@ export default function EventDetailScreen() {
         t('review.error.submitFailed', { reason: t('review.error.uploadTimeout') })
       );
 
+      try {
+        await socialService.logActivity({
+          actionType: 'review',
+          targetId: eventId,
+          targetType: 'event',
+        });
+      } catch (activityError: any) {
+        console.warn('event review activity log failed:', activityError?.message ?? activityError);
+      }
+
       setDraftComment('');
       setDraftRating(5);
       setDraftPhotoAssets([]);
@@ -1328,8 +1358,18 @@ export default function EventDetailScreen() {
     }
   }, [addNotification, event, formatEventDateTimeText, t]);
 
+  const qrSharePayload = useMemo(() => {
+    if (!event) return null;
+
+    const publicUrl = buildEventPublicUrl(event);
+    return {
+      qrValue: publicUrl,
+      shareMessage: `Khám phá sự kiện "${event.title}" tại ExploreEase:\n${publicUrl}`,
+    };
+  }, [event]);
+
   const onToggleEventBookmark = useCallback(async () => {
-    if (!eventId || bookmarkPending) return;
+    if (!eventId || bookmarkPending || !event) return;
 
     const next = !isBookmarked;
     setBookmarkPending(true);
@@ -1337,8 +1377,22 @@ export default function EventDetailScreen() {
 
     try {
       await eventBookmarkService.setBookmarked(eventId, next, currentUserId);
+      try {
+        await syncBookmarkedEventReminderAsync({
+          bookmarked: next,
+          eventId: event.id,
+          eventTitle: event.title,
+          startTime: event.start_time,
+          location: event.location,
+          userId: currentUserId,
+        });
+      } catch (reminderErr: any) {
+        console.warn('event detail bookmark reminder sync failed:', reminderErr?.message ?? reminderErr);
+      }
       addNotification({
-        message: next ? t('event.detail.bookmarkSaved') : t('event.detail.bookmarkRemoved'),
+        message: next
+          ? `Đã lưu sự kiện "${event.title}"`
+          : `Đã bỏ lưu sự kiện "${event.title}"`,
         type: 'success',
         durationMs: 2600,
       });
@@ -1353,7 +1407,7 @@ export default function EventDetailScreen() {
     } finally {
       setBookmarkPending(false);
     }
-  }, [addNotification, bookmarkPending, currentUserId, eventId, isBookmarked, t]);
+  }, [addNotification, bookmarkPending, currentUserId, event, eventId, isBookmarked, t]);
 
   const onPressMessageOrganizer = useCallback(() => {
     const organizerId = String(event?.creator_id ?? '').trim();
@@ -1492,6 +1546,26 @@ export default function EventDetailScreen() {
             >
               <MaterialCommunityIcons name="share-variant" size={18} color={ExploreEaseColors.primary} />
               <Text style={[styles.utilityActionText, { color: colors.text }]}>{t('event.detail.shareAction')}</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                releaseOverlayTriggerFocus();
+                setQrShareVisible(true);
+              }}
+              style={({ pressed }) => [
+                styles.utilityActionBtn,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)',
+                },
+                pressed ? { opacity: 0.84 } : null,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Chia sẻ QR sự kiện"
+            >
+              <MaterialCommunityIcons name="qrcode" size={18} color={ExploreEaseColors.primary} />
+              <Text style={[styles.utilityActionText, { color: colors.text }]}>Chia sẻ QR</Text>
             </Pressable>
 
             <Pressable
@@ -2353,6 +2427,15 @@ export default function EventDetailScreen() {
         isVisible={shareSheetVisible}
         onClose={() => setShareSheetVisible(false)}
         onShare={(text) => void onShareEvent(text)}
+      />
+
+      <QrShareModal
+        visible={qrShareVisible && !!qrSharePayload}
+        title="Chia sẻ QR sự kiện"
+        subtitle="Người khác có thể quét mã để mở nhanh trang sự kiện."
+        qrValue={qrSharePayload?.qrValue ?? ''}
+        shareMessage={qrSharePayload?.shareMessage ?? ''}
+        onClose={() => setQrShareVisible(false)}
       />
     </SafeAreaView>
   );

@@ -177,9 +177,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(34, 211, 238, 0.14)',
+    backgroundColor: 'rgba(0, 119, 182, 0.14)',
     borderWidth: 1,
-    borderColor: 'rgba(34, 211, 238, 0.30)',
+    borderColor: 'rgba(0, 119, 182, 0.30)',
   },
   viewAllText: {
     color: ExploreEaseColors.primary,

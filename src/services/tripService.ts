@@ -8,6 +8,8 @@ export type TripRow = {
   start_date?: string | null;
   end_date?: string | null;
   destination?: string | null;
+  notes?: string | null;
+  optimized_route?: unknown;
   created_at?: string | null;
 };
 
@@ -44,6 +46,8 @@ export const tripService = {
     start_date?: string | null;
     end_date?: string | null;
     destination?: string | null;
+    notes?: string | null;
+    optimized_route?: unknown;
   }): Promise<TripRow> {
     const userId = await ensureAuthenticatedUserId();
 
@@ -54,6 +58,8 @@ export const tripService = {
       start_date: input.start_date ?? null,
       end_date: input.end_date ?? null,
       destination: input.destination ?? null,
+      notes: input.notes ?? null,
+      optimized_route: input.optimized_route ?? [],
     };
 
     // Injected Logs: create trip data flow

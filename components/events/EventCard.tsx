@@ -97,7 +97,7 @@ export function EventCard({
     return getEventStatusByTime(event.start_time, event.end_time, new Date(nowTs));
   }, [event.end_time, event.start_time, nowTs]);
 
-  const shouldRunCountdown = showCountdown && liveStatus === 'incoming';
+  const shouldRunCountdown = showCountdown && isBookmarked && liveStatus === 'incoming';
 
   useEffect(() => {
     if (!shouldRunCountdown) return;
@@ -146,7 +146,7 @@ export function EventCard({
         Platform.OS === 'web' && hovered ? { opacity: 0.98 } : null,
         pressed ? { opacity: 0.86 } : null,
       ]}
-      accessibilityRole="button"
+      accessibilityRole={Platform.OS === 'web' ? undefined : 'button'}
     >
       <ImageBackground
         source={{ uri: event.image_url || FALLBACK_EVENT_IMAGE }}

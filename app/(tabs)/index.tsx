@@ -12,18 +12,20 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    useWindowDimensions,
-    View,
-    type ColorValue,
-    type NativeScrollEvent,
-    type NativeSyntheticEvent
+  ActivityIndicator,
+  Alert,
+  Animated,
+  FlatList,
+  ImageBackground,
+  Platform,
+  SafeAreaView,
+  StatusBar,
+  Text,
+  useWindowDimensions,
+  View,
+  type ColorValue,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent
 } from 'react-native';
 import { FestivalShareModal } from '../../components/events/FestivalShareModal';
 import { CategoriesCarousel } from '../../components/home/CategoriesCarousel';
@@ -37,11 +39,12 @@ import { YouMightAlsoLike, type YouMightAlsoLikeItem } from '../../components/ho
 import { ExploreEaseColors } from '../../constants/exploreEaseTheme';
 import { destinationService } from '../../src/services/destinationService';
 import { eventService, type EventRow } from '../../src/services/eventService';
-import { presentLocalNotificationAsync } from '../../src/services/localNotificationService';
+import { presentLocalNotificationAsync, syncBookmarkedEventReminderAsync } from '../../src/services/localNotificationService';
 import { profileService } from '../../src/services/profileService';
 import { recommendationService, resolveTimeOfDayPreference, type PersonalizedRecommendationsResult } from '../../src/services/recommendationService';
 import { supabase } from '../../src/services/supabase';
 import { useRecommendationPreferencesStore } from '../../src/store/useRecommendationPreferencesStore';
+import { useNotificationStore } from '../../src/store/useNotificationStore';
 
 type CategoryRow = {
   id: number;
@@ -136,6 +139,7 @@ export default function HomeScreen() {
   const [voiceSearchState, setVoiceSearchState] = useState<VoiceSearchState>('idle');
   const timeOfDayPreference = useRecommendationPreferencesStore((s) => s.timeOfDayPreference);
   const setTimeOfDayPreference = useRecommendationPreferencesStore((s) => s.setTimeOfDayPreference);
+  const addNotification = useNotificationStore((s) => s.addNotification);
 
   const recordingRef = React.useRef<Audio.Recording | null>(null);
 
@@ -697,6 +701,8 @@ export default function HomeScreen() {
     const safeEventId = String(eventId ?? '').trim();
     if (!safeEventId) return;
 
+    const targetEvent = homeEvents.find((item) => item.id === safeEventId);
+
     setHomeEventBookmarkPendingMap((prev) => ({
       ...prev,
       [safeEventId]: true,
@@ -708,6 +714,30 @@ export default function HomeScreen() {
 
     try {
       await eventBookmarkService.setBookmarked(safeEventId, nextBookmarked, currentUserId);
+
+      if (targetEvent) {
+        try {
+          await syncBookmarkedEventReminderAsync({
+            bookmarked: nextBookmarked,
+            eventId: targetEvent.id,
+            eventTitle: targetEvent.title,
+            startTime: targetEvent.start_time,
+            location: targetEvent.location,
+            userId: currentUserId,
+          });
+        } catch (reminderErr: any) {
+          console.warn('home bookmark reminder sync failed:', reminderErr?.message ?? reminderErr);
+        }
+
+        const eventTitle = targetEvent.title?.trim() || 'sự kiện này';
+        addNotification({
+          message: nextBookmarked
+            ? `Đã lưu sự kiện "${eventTitle}"`
+            : `Đã bỏ lưu sự kiện "${eventTitle}"`,
+          type: 'success',
+          durationMs: 2600,
+        });
+      }
     } catch (err: any) {
       console.warn('onToggleHomeEventBookmark failed:', err?.message ?? err);
       setHomeEventBookmarkMap((prev) => ({
@@ -722,7 +752,7 @@ export default function HomeScreen() {
         return next;
       });
     }
-  }, [currentUserId, t]);
+  }, [addNotification, currentUserId, homeEvents, t]);
 
   const onPressViewAllFestivals = useCallback(() => {
     router.push('/festivals' as any);
@@ -1008,7 +1038,9 @@ export default function HomeScreen() {
   );
 
   const activeTimeOfDay = personalized?.timeOfDay ?? effectiveTimeOfDay;
-  const isLoadingMoreContent = loadingMoreDestinations || loadingMoreHomeEvents;
+  const isLoadingMore = loadingMoreDestinations || loadingMoreHomeEvents;
+  const hasMore = hasMoreDestinations || hasMoreHomeEvents;
+  const homeDataLength = allDestinations.length + homeEvents.length;
 
   return (
     <LinearGradient colors={gradientColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.mainContainer}>
@@ -1019,119 +1051,174 @@ export default function HomeScreen() {
         <Animated.View style={[styles.bgCircle2, blobAnimStyle2]} />
       </View>
 
-      <SafeAreaView style={{ flex: 1 }}>
+      <SafeAreaView style={styles.safeAreaContent}>
         {isLoading ? (
           <View style={[styles.loadingIndicator, { pointerEvents: 'none' }]} />
         ) : null}
-        <ScrollView
+        <FlatList
+          data={['home-root']}
+          keyExtractor={(item) => item}
+          renderItem={() => (
+            <View style={styles.pageContent}>
+              <Header
+                styles={styles}
+                name={displayName}
+                avatarUrl={avatarUrl}
+                isDarkMode={isDark}
+                showNotificationsButton={false}
+              />
+
+              <SearchBar
+                styles={styles}
+                isDarkMode={isDark}
+                value={searchText}
+                onChangeText={onChangeSearchText}
+                onSubmitEditing={onSubmitSearch}
+                onPressFilters={onPressFilters}
+                onPressVoiceSearch={onPressVoiceSearch}
+                disableVoiceSearch={voiceSearchState === 'processing'}
+                voiceSearchState={voiceSearchState}
+                voiceStatusText={voiceStatusText}
+              />
+
+              <CategoriesCarousel
+                styles={styles}
+                isDarkMode={isDark}
+                categories={categoryItems}
+                activeId={selectedCategory}
+                initialActiveId={categoryItems[0]?.id}
+                onChange={onChangeCategory}
+              />
+
+              {featuredForDisplay ? (
+                <FeaturedDestination
+                  styles={styles}
+                  title={featuredForDisplay.name}
+                  location={featuredForDisplay.location}
+                  price={toDisplayPrice(featuredForDisplay.price) || '—'}
+                  rating={toRating(featuredForDisplay.rating)}
+                  imageUrl={featuredForDisplay.image_url ?? ''}
+                  onPress={() => {
+                    router.push(
+                      {
+                        pathname: '/destination/[id]',
+                        params: {
+                          id: String(featuredForDisplay.id),
+                          name: featuredForDisplay.name,
+                          location: featuredForDisplay.location,
+                          price: toDisplayPrice(featuredForDisplay.price) || '—',
+                          rating: String(toRating(featuredForDisplay.rating)),
+                          imageUrl: featuredForDisplay.image_url ?? '',
+                        },
+                      } as any
+                    );
+                  }}
+                />
+              ) : null}
+
+              <TimeOfDayToggle
+                value={timeOfDayPreference}
+                onChange={setTimeOfDayPreference}
+              />
+
+              <YouMightAlsoLike
+                items={personalizedItems}
+                loading={loadingPersonalized}
+                timeOfDay={activeTimeOfDay}
+                travelStyle={personalized?.preferences.travelStyle ?? null}
+                onPressItem={onPressPersonalizedItem}
+              />
+
+              <FestivalHighlights
+                events={homeEvents}
+                loading={loadingHomeEvents}
+                bookmarkedMap={homeEventBookmarkMap}
+                bookmarkPendingMap={homeEventBookmarkPendingMap}
+                onPressEvent={onPressHomeEvent}
+                onShareEvent={onShareHomeEvent}
+                onToggleBookmark={onToggleHomeEventBookmark}
+                onPressViewAll={onPressViewAllFestivals}
+              />
+
+              <PopularDestinations
+                styles={styles}
+                destinations={popularItems}
+              />
+            </View>
+          )}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 120 }]}
           onScroll={onHomeScroll}
           scrollEventThrottle={16}
-        >
-          <View style={styles.pageContent}>
-            <Header
-              styles={styles}
-              name={displayName}
-              avatarUrl={avatarUrl}
-              isDarkMode={isDark}
-              showNotificationsButton={false}
-            />
-
-            <SearchBar
-              styles={styles}
-              isDarkMode={isDark}
-              value={searchText}
-              onChangeText={onChangeSearchText}
-              onSubmitEditing={onSubmitSearch}
-              onPressFilters={onPressFilters}
-              onPressVoiceSearch={onPressVoiceSearch}
-              disableVoiceSearch={voiceSearchState === 'processing'}
-              voiceSearchState={voiceSearchState}
-              voiceStatusText={voiceStatusText}
-            />
-
-            <CategoriesCarousel
-              styles={styles}
-              isDarkMode={isDark}
-              categories={categoryItems}
-              activeId={selectedCategory}
-              initialActiveId={categoryItems[0]?.id}
-              onChange={onChangeCategory}
-            />
-
-            {featuredForDisplay ? (
-              <FeaturedDestination
-                styles={styles}
-                title={featuredForDisplay.name}
-                location={featuredForDisplay.location}
-                price={toDisplayPrice(featuredForDisplay.price) || '—'}
-                rating={toRating(featuredForDisplay.rating)}
-                imageUrl={featuredForDisplay.image_url ?? ''}
-                onPress={() => {
-                  router.push(
-                    {
-                      pathname: '/destination/[id]',
-                      params: {
-                        id: String(featuredForDisplay.id),
-                        name: featuredForDisplay.name,
-                        location: featuredForDisplay.location,
-                        price: toDisplayPrice(featuredForDisplay.price) || '—',
-                        rating: String(toRating(featuredForDisplay.rating)),
-                        imageUrl: featuredForDisplay.image_url ?? '',
-                      },
-                    } as any
-                  );
-                }}
-              />
-            ) : null}
-
-            <TimeOfDayToggle
-              value={timeOfDayPreference}
-              onChange={setTimeOfDayPreference}
-            />
-
-            <YouMightAlsoLike
-              items={personalizedItems}
-              loading={loadingPersonalized}
-              timeOfDay={activeTimeOfDay}
-              travelStyle={personalized?.preferences.travelStyle ?? null}
-              onPressItem={onPressPersonalizedItem}
-            />
-
-            <FestivalHighlights
-              events={homeEvents}
-              loading={loadingHomeEvents}
-              bookmarkedMap={homeEventBookmarkMap}
-              bookmarkPendingMap={homeEventBookmarkPendingMap}
-              onPressEvent={onPressHomeEvent}
-              onShareEvent={onShareHomeEvent}
-              onToggleBookmark={onToggleHomeEventBookmark}
-              onPressViewAll={onPressViewAllFestivals}
-            />
-
-            <PopularDestinations
-              styles={styles}
-              destinations={popularItems}
-            />
-
-            {isLoadingMoreContent ? (
+          ListFooterComponent={
+            isLoadingMore ? (
               <View
                 style={{
-                  marginTop: 8,
-                  marginBottom: 8,
-                  minHeight: 28,
-                  alignItems: 'center',
+                  paddingVertical: 20,
                   justifyContent: 'center',
+                  alignItems: 'center',
                 }}
               >
-                <ActivityIndicator size="small" color={ExploreEaseColors.primary} />
+                  <ActivityIndicator size="large" color={ExploreEaseColors.primary} />
               </View>
-            ) : null}
-
-            <View style={{ height: 48 }} />
-          </View>
-        </ScrollView>
+            ) : !hasMore && homeDataLength > 0 ? (
+              <ImageBackground
+                source={require('../../assets/images/background-vlu.png')}
+                style={{
+                  width: '100%',
+                  borderRadius: 14,
+                  overflow: 'hidden',
+                }}
+                imageStyle={{
+                  borderRadius: 14,
+                }}
+              >
+                <View
+                  style={{
+                    paddingTop: 14,
+                    paddingBottom: 40,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: isDark ? 'rgba(2, 23, 43, 0.56)' : 'rgba(255, 255, 255, 0.68)',
+                  }}
+                >
+                  <Text
+                    style={{
+                      textAlign: 'center',
+                      fontSize: 12,
+                      fontWeight: '700',
+                      marginBottom: 4,
+                      color: isDark ? '#dbeafe' : '#1e3a5f',
+                    }}
+                  >
+                    Dự án: ExploreEase
+                  </Text>
+                  <Text
+                    style={{
+                      textAlign: 'center',
+                      fontSize: 12,
+                      fontWeight: '700',
+                      marginBottom: 8,
+                      color: '#0077B6',
+                    }}
+                  >
+                    Thực hiện bởi: Nguyễn Mạnh Hoàng Nguyên
+                  </Text>
+                  <View
+                    style={{
+                      width: 80,
+                      height: 80,
+                      borderRadius: 8,
+                      backgroundColor: '#e5e5e5',
+                    }}
+                  >
+                    {/* // 🎯 TODO: [PASTE VLU LOGO HERE] */}
+                  </View>
+                </View>
+              </ImageBackground>
+            ) : null
+          }
+        />
 
         <FestivalShareModal
           visible={!!shareEvent}

@@ -1,18 +1,22 @@
+import { CreateEventForm, type EventFormData } from '@/components/events/CreateEventForm';
+import { EditEventForm, type EventEditData } from '@/components/events/EditEventForm';
 import { ExploreEaseColors } from '@/constants/exploreEaseTheme';
 import { useTheme } from '@/src/context/theme';
 import { useI18n } from '@/src/i18n/useI18n';
 import { adminService } from '@/src/services/adminService';
+import { eventService, type EventRow } from '@/src/services/eventService';
 import { itineraryService } from '@/src/services/itineraryService';
 import { profileService } from '@/src/services/profileService';
 import { reviewService } from '@/src/services/reviewService';
+import { storageService } from '@/src/services/storageService';
 import { supabase } from '@/src/services/supabase';
 import { useLanguageStore } from '@/src/store/useLanguageStore';
 import { useNotificationStore } from '@/src/store/useNotificationStore';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useMemo } from 'react';
-import { ActivityIndicator, Image, Keyboard, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Keyboard, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 const releaseOverlayTriggerFocus = () => {
   Keyboard.dismiss();
@@ -29,7 +33,33 @@ const releaseOverlayTriggerFocus = () => {
   }
 };
 
+const toDateInput = (value?: string | null) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const toTimeInput = (value?: string | null) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+};
+
+const combineLocalDateTime = (dateText: string, timeText: string): Date | null => {
+  const dt = new Date(`${dateText.trim()}T${timeText.trim()}:00`);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt;
+};
+
 export default function ProfileScreen() {
+  const params = useLocalSearchParams<{ openCreateEvent?: string | string[] }>();
   const { isDark, toggleColorScheme } = useTheme();
   const addNotification = useNotificationStore((s) => s.addNotification);
   const { language, t } = useI18n();
@@ -43,6 +73,11 @@ export default function ProfileScreen() {
   const [tripCount, setTripCount] = React.useState<number>(0);
   const [reviewCount, setReviewCount] = React.useState<number>(0);
   const [loadingStats, setLoadingStats] = React.useState<boolean>(true);
+  const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
+  const [myEvents, setMyEvents] = React.useState<EventRow[]>([]);
+  const [loadingMyEvents, setLoadingMyEvents] = React.useState<boolean>(true);
+  const [createEventModalVisible, setCreateEventModalVisible] = React.useState(false);
+  const [editingEvent, setEditingEvent] = React.useState<EventRow | null>(null);
   const [isAdmin, setIsAdmin] = React.useState(false);
   const [languageModalVisible, setLanguageModalVisible] = React.useState(false);
   const [uploadingAvatar, setUploadingAvatar] = React.useState(false);
@@ -159,6 +194,115 @@ export default function ProfileScreen() {
 
   const currencyLabel = nationalityCode === 'VN' ? t('profile.currency.vnd') : t('profile.currency.usd');
 
+  const getEventStatusTone = React.useCallback((event: EventRow) => {
+    const status = String(event.approval_status ?? event.moderation_status ?? 'pending').trim().toLowerCase();
+
+    if (status === 'approved') {
+      return {
+        label: 'Đã duyệt',
+        textColor: '#047857',
+        borderColor: 'rgba(16, 185, 129, 0.28)',
+        backgroundColor: 'rgba(16, 185, 129, 0.12)',
+      };
+    }
+
+    if (status === 'rejected') {
+      return {
+        label: 'Bị từ chối',
+        textColor: '#b91c1c',
+        borderColor: 'rgba(239, 68, 68, 0.28)',
+        backgroundColor: 'rgba(239, 68, 68, 0.12)',
+      };
+    }
+
+    return {
+      label: 'Chờ duyệt',
+      textColor: '#b45309',
+      borderColor: 'rgba(245, 158, 11, 0.28)',
+      backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    };
+  }, []);
+
+  const formatEventSchedule = React.useCallback((event: EventRow) => {
+    const dateLabel = toDateInput(event.start_time);
+    const startLabel = toTimeInput(event.start_time);
+    const endLabel = toTimeInput(event.end_time);
+    const timeLabel = startLabel && endLabel ? `${startLabel} - ${endLabel}` : (startLabel || endLabel);
+    return [dateLabel, timeLabel].filter(Boolean).join(' • ') || 'Chưa có lịch cụ thể';
+  }, []);
+
+  const loadMyEvents = React.useCallback(async () => {
+    setLoadingMyEvents(true);
+
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error) throw error;
+
+      const userId = data.user?.id ?? null;
+      setCurrentUserId(userId);
+
+      if (!userId) {
+        setMyEvents([]);
+        return;
+      }
+
+      const rows = await eventService.getEvents({
+        creatorId: userId,
+        orderBy: 'created_at',
+        ascending: false,
+        limit: 30,
+      });
+
+      setMyEvents(rows);
+    } catch (error) {
+      console.warn('loadMyEvents failed:', error);
+      setCurrentUserId(null);
+      setMyEvents([]);
+    } finally {
+      setLoadingMyEvents(false);
+    }
+  }, []);
+
+  const editingEventFormData = React.useMemo<EventEditData | null>(() => {
+    if (!editingEvent) return null;
+
+    return {
+      title: editingEvent.title ?? '',
+      category: editingEvent.category ?? '',
+      location: editingEvent.location ?? '',
+      startDate: toDateInput(editingEvent.start_time),
+      startTime: toTimeInput(editingEvent.start_time),
+      endDate: toDateInput(editingEvent.end_time),
+      endTime: toTimeInput(editingEvent.end_time),
+      price: String(typeof editingEvent.price === 'number' ? editingEvent.price : 0),
+      imageUrl: typeof editingEvent.image_url === 'string' ? editingEvent.image_url : '',
+      description: typeof editingEvent.description === 'string' ? editingEvent.description : '',
+    };
+  }, [editingEvent]);
+
+  React.useEffect(() => {
+    void loadMyEvents();
+
+    const { data } = supabase.auth.onAuthStateChange(() => {
+      void loadMyEvents();
+    });
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
+  }, [loadMyEvents]);
+
+  React.useEffect(() => {
+    const shouldOpen = Array.isArray(params.openCreateEvent)
+      ? params.openCreateEvent[0] === '1'
+      : params.openCreateEvent === '1';
+
+    if (!shouldOpen || !currentUserId) return;
+
+    releaseOverlayTriggerFocus();
+    setCreateEventModalVisible(true);
+  }, [currentUserId, params.openCreateEvent]);
+
   const handleEditProfile = React.useCallback(() => {
     router.push('/profile-setup');
   }, []);
@@ -273,6 +417,163 @@ export default function ProfileScreen() {
       setUploadingAvatar(false);
     }
   }, [addNotification, t, uploadingAvatar]);
+
+  const handleOpenCreateEvent = React.useCallback(() => {
+    if (!currentUserId) {
+      Alert.alert('Cần đăng nhập', 'Hãy đăng nhập để tạo và quản lý sự kiện của bạn.');
+      return;
+    }
+
+    releaseOverlayTriggerFocus();
+    setCreateEventModalVisible(true);
+  }, [currentUserId]);
+
+  const handleCreateEvent = React.useCallback(async (form: EventFormData) => {
+    const start = combineLocalDateTime(form.startDate, form.startTime);
+    const end = combineLocalDateTime(form.endDate, form.endTime);
+
+    if (!start || !end) {
+      Alert.alert('Không thể tạo sự kiện', 'Ngày giờ sự kiện chưa hợp lệ.');
+      throw new Error('Invalid datetime format');
+    }
+
+    if (end <= start) {
+      Alert.alert('Không thể tạo sự kiện', 'Ngày kết thúc phải sau ngày bắt đầu.');
+      throw new Error('end_time must be greater than start_time');
+    }
+
+    const price = Number(form.price || '0');
+    if (Number.isNaN(price) || price < 0) {
+      Alert.alert('Không thể tạo sự kiện', 'Giá vé phải lớn hơn hoặc bằng 0.');
+      throw new Error('Invalid price');
+    }
+
+    try {
+      let uploadedImageUrl: string | null = null;
+      if (form.imageUri.trim()) {
+        const uploaded = await storageService.uploadEventImage({
+          uri: form.imageUri.trim(),
+          fileName: form.imageFileName || undefined,
+          contentType: form.imageMimeType || undefined,
+        });
+        uploadedImageUrl = uploaded.publicUrl;
+      }
+
+      await eventService.createEventForCurrentUser({
+        title: form.title,
+        category: form.category,
+        location: form.location,
+        start_time: start,
+        end_time: end,
+        price,
+        image_url: uploadedImageUrl,
+        description: form.description.trim() ? form.description.trim() : null,
+      });
+
+      setCreateEventModalVisible(false);
+      addNotification({
+        message: `Đã tạo sự kiện "${form.title.trim() || 'mới'}"`,
+        type: 'success',
+        durationMs: 2600,
+      });
+      await loadMyEvents();
+    } catch (error: any) {
+      const message = String(error?.message ?? '').trim() || 'Không thể tạo sự kiện lúc này.';
+      Alert.alert('Không thể tạo sự kiện', message);
+      throw error;
+    }
+  }, [addNotification, loadMyEvents]);
+
+  const handleSubmitEditEvent = React.useCallback(async (form: EventEditData) => {
+    if (!editingEvent) return;
+
+    const start = combineLocalDateTime(form.startDate, form.startTime);
+    const end = combineLocalDateTime(form.endDate, form.endTime);
+
+    if (!start || !end) {
+      Alert.alert('Không thể cập nhật sự kiện', 'Ngày giờ sự kiện chưa hợp lệ.');
+      throw new Error('Invalid datetime format');
+    }
+
+    if (end <= start) {
+      Alert.alert('Không thể cập nhật sự kiện', 'Ngày kết thúc phải sau ngày bắt đầu.');
+      throw new Error('end_time must be greater than start_time');
+    }
+
+    const price = Number(form.price || '0');
+    if (Number.isNaN(price) || price < 0) {
+      Alert.alert('Không thể cập nhật sự kiện', 'Giá vé phải lớn hơn hoặc bằng 0.');
+      throw new Error('Invalid price');
+    }
+
+    try {
+      await eventService.updateEvent(editingEvent.id, {
+        title: form.title,
+        category: form.category,
+        location: form.location,
+        start_time: start,
+        end_time: end,
+        price,
+        image_url: form.imageUrl.trim() || null,
+        description: form.description.trim() || null,
+      });
+
+      const eventTitle = form.title.trim() || editingEvent.title || 'sự kiện';
+      setEditingEvent(null);
+      addNotification({
+        message: `Đã cập nhật sự kiện "${eventTitle}"`,
+        type: 'success',
+        durationMs: 2600,
+      });
+      await loadMyEvents();
+    } catch (error: any) {
+      const message = String(error?.message ?? '').trim() || 'Không thể cập nhật sự kiện lúc này.';
+      Alert.alert('Không thể cập nhật sự kiện', message);
+      throw error;
+    }
+  }, [addNotification, editingEvent, loadMyEvents]);
+
+  const handleDeleteEvent = React.useCallback(async (eventId: string) => {
+    const targetEvent = myEvents.find((item) => item.id === eventId) ?? editingEvent ?? null;
+    const eventTitle = targetEvent?.title?.trim() || 'sự kiện này';
+
+    await new Promise<void>((resolve, reject) => {
+      Alert.alert(
+        'Xóa sự kiện',
+        `Bạn có chắc muốn xóa "${eventTitle}" không?`,
+        [
+          {
+            text: 'Hủy',
+            style: 'cancel',
+            onPress: () => resolve(),
+          },
+          {
+            text: 'Xóa',
+            style: 'destructive',
+            onPress: () => {
+              void (async () => {
+                try {
+                  await eventService.deleteEvent(eventId);
+                  setEditingEvent(null);
+                  addNotification({
+                    message: `Đã xóa sự kiện "${eventTitle}"`,
+                    type: 'success',
+                    durationMs: 2600,
+                  });
+                  await loadMyEvents();
+                  resolve();
+                } catch (error: any) {
+                  const message = String(error?.message ?? '').trim() || 'Không thể xóa sự kiện lúc này.';
+                  Alert.alert('Không thể xóa sự kiện', message);
+                  reject(error);
+                }
+              })();
+            },
+          },
+        ]
+      );
+    });
+  }, [addNotification, editingEvent, loadMyEvents, myEvents]);
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
@@ -389,6 +690,122 @@ export default function ProfileScreen() {
               </View>
               <Text style={[styles.statValue, { color: colors.title }]}>{loadingStats ? '...' : reviewCount}</Text>
             </View>
+          </View>
+
+          <Text style={[styles.blockTitle, { color: colors.title, marginTop: 22 }]}>Sự kiện của tôi</Text>
+          <Text style={[styles.myEventsSubtitle, { color: colors.subtitle }]}>
+            {loadingMyEvents ? 'Đang tải danh sách sự kiện bạn quản lý...' : `${myEvents.length} sự kiện bạn đang quản lý`}
+          </Text>
+
+          <Pressable
+            onPress={handleOpenCreateEvent}
+            style={({ pressed }) => [
+              styles.createEventButton,
+              pressed ? { opacity: 0.86 } : null,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Tạo sự kiện mới"
+          >
+            <Feather name="plus" size={18} color="#ffffff" />
+            <Text style={styles.createEventButtonText}>Tạo sự kiện mới</Text>
+          </Pressable>
+
+          <View style={[styles.myEventsCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+            {loadingMyEvents ? (
+              <View style={styles.myEventsStateWrap}>
+                <ActivityIndicator color={ExploreEaseColors.primary} />
+                <Text style={[styles.myEventsStateText, { color: colors.subtitle }]}>Đang đồng bộ sự kiện của bạn...</Text>
+              </View>
+            ) : !currentUserId ? (
+              <View style={styles.myEventsStateWrap}>
+                <Text style={[styles.myEventsStateText, { color: colors.subtitle }]}>
+                  Đăng nhập để quản lý các sự kiện bạn đã tạo.
+                </Text>
+              </View>
+            ) : myEvents.length === 0 ? (
+              <View style={styles.myEventsStateWrap}>
+                <Text style={[styles.myEventsStateText, { color: colors.subtitle }]}>
+                  Bạn chưa có sự kiện nào. Hãy tạo sự kiện mới để gửi duyệt.
+                </Text>
+              </View>
+            ) : (
+              myEvents.map((event, index) => {
+                const tone = getEventStatusTone(event);
+
+                return (
+                  <View
+                    key={event.id}
+                    style={[
+                      styles.myEventRow,
+                      {
+                        borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.myEventBody}>
+                      <View style={styles.myEventTopRow}>
+                        <Text style={[styles.myEventTitle, { color: colors.title }]} numberOfLines={2}>
+                          {event.title}
+                        </Text>
+                        <View
+                          style={[
+                            styles.statusBadge,
+                            {
+                              backgroundColor: tone.backgroundColor,
+                              borderColor: tone.borderColor,
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.statusBadgeText, { color: tone.textColor }]}>{tone.label}</Text>
+                        </View>
+                      </View>
+
+                      <Text style={[styles.myEventMeta, { color: colors.subtitle }]} numberOfLines={2}>
+                        {event.location || 'Chưa có địa điểm'}
+                      </Text>
+                      <Text style={[styles.myEventMeta, { color: colors.subtitle }]}>
+                        {formatEventSchedule(event)}
+                      </Text>
+                    </View>
+
+                    <View style={styles.myEventActions}>
+                      <Pressable
+                        onPress={() => {
+                          releaseOverlayTriggerFocus();
+                          setEditingEvent(event);
+                        }}
+                        style={({ pressed }) => [
+                          styles.myEventIconBtn,
+                          { borderColor: colors.border, backgroundColor: colors.softCardBg },
+                          pressed ? { opacity: 0.84 } : null,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Chỉnh sửa sự kiện ${event.title}`}
+                      >
+                        <Feather name="edit-2" size={16} color={ExploreEaseColors.primary} />
+                      </Pressable>
+
+                      <Pressable
+                        onPress={() => void handleDeleteEvent(event.id)}
+                        style={({ pressed }) => [
+                          styles.myEventIconBtn,
+                          {
+                            borderColor: 'rgba(239, 68, 68, 0.24)',
+                            backgroundColor: 'rgba(239, 68, 68, 0.10)',
+                          },
+                          pressed ? { opacity: 0.84 } : null,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Xóa sự kiện ${event.title}`}
+                      >
+                        <Feather name="trash-2" size={16} color="#ef4444" />
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })
+            )}
           </View>
 
           {/* Settings */}
@@ -527,6 +944,39 @@ export default function ProfileScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <Modal
+        visible={createEventModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setCreateEventModalVisible(false)}
+      >
+        <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
+          <CreateEventForm
+            onCancel={() => setCreateEventModalVisible(false)}
+            onSubmit={handleCreateEvent}
+          />
+        </SafeAreaView>
+      </Modal>
+
+      <Modal
+        visible={!!editingEvent && !!editingEventFormData}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setEditingEvent(null)}
+      >
+        <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
+          {editingEvent && editingEventFormData ? (
+            <EditEventForm
+              eventId={editingEvent.id}
+              initialData={editingEventFormData}
+              onSubmit={handleSubmitEditEvent}
+              onDelete={handleDeleteEvent}
+              onCancel={() => setEditingEvent(null)}
+            />
+          ) : null}
+        </SafeAreaView>
+      </Modal>
 
       <Modal
         visible={languageModalVisible}
@@ -716,6 +1166,98 @@ const styles = StyleSheet.create({
   statTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   statLabel: { fontSize: 12, fontWeight: '900', letterSpacing: 0.2 },
   statValue: { marginTop: 16, fontSize: 32, fontWeight: '900' },
+  myEventsSubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  createEventButton: {
+    marginTop: 12,
+    minHeight: 46,
+    borderRadius: 14,
+    backgroundColor: ExploreEaseColors.primary,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  createEventButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  myEventsCard: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  myEventsStateWrap: {
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  myEventsStateText: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  myEventRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  myEventBody: {
+    flex: 1,
+    gap: 4,
+  },
+  myEventTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  myEventTitle: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '900',
+  },
+  myEventMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  statusBadge: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  myEventActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingTop: 2,
+  },
+  myEventIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   settingsCard: {
     marginTop: 12,
